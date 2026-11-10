@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>408 考点演化图谱 · 2009—2026</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="fx-grid"></div>
+<div class="fx-glow"></div>
+<div class="fx-scan"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">408</div>
+    <div class="brand-txt">
+      <h1>计算机学科专业基础综合 · 考点演化图谱</h1>
+      <p><b class="mono">2009 — 2026</b> · 18 套真题 · 4 科 25 章 · <b id="stat-points" class="mono">—</b> 个知识点</p>
+    </div>
+  </div>
+  <nav class="topnav">
+    <a href="#map">考点星图</a>
+    <a href="#matrix">演化矩阵</a>
+    <a href="#trend">难度曲线</a>
+    <a href="#insight">趋势洞察</a>
+  </nav>
+</header>
+
+<!-- ============ 第一屏：考点星图 ============ -->
+<section class="stage-sec" id="map">
+  <div class="stage">
+    <div class="map-wrap">
+      <div class="hud-corners"><i></i><i></i><i></i><i></i></div>
+      <div class="map-scan"></div>
+      <div class="map-hint">
+        <span class="dot"></span>悬停任意章节节点，右侧展开该章全部知识点 · 点击可固定
+      </div>
+      <svg id="map-svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="map-legend">
+        <span><i style="--c:#22d3ee"></i>数据结构</span>
+        <span><i style="--c:#a78bfa"></i>组成原理</span>
+        <span><i style="--c:#fbbf24"></i>操作系统</span>
+        <span><i style="--c:#34d399"></i>计算机网络</span>
+      </div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <div class="panel-head">
+        <span class="panel-label">INSPECTOR</span>
+        <span class="panel-mode" id="panel-mode">卷面结构</span>
+      </div>
+      <div class="panel-body" id="panel-body"></div>
+    </aside>
+  </div>
+
+  <div class="yearbar" id="yearbar">
+    <div class="yearbar-title">
+      <span class="mono">YEAR SCAN</span>
+      <em>悬停年份 · 指示灯所在年考过的综合题</em>
+    </div>
+    <div class="year-track" id="year-track"></div>
+    <button class="reset-btn" id="reset-btn" type="button">重置</button>
+  </div>
+</section>
+
+<!-- ============ 演化矩阵 ============ -->
+<section class="block" id="matrix">
+  <div class="block-head">
+    <div>
+      <span class="kicker">02 / EVOLUTION MATRIX</span>
+      <h2>综合题考点演化矩阵</h2>
+      <p>16 类综合题考点 × 18 年。每一格代表该年 41—47 题中出现过这一考点，颜色按科目区分；横向看是某个考点的"回归周期"，纵向看是一张卷子的综合题构图。</p>
+    </div>
+    <div class="matrix-legend">
+      <span><i style="--c:#22d3ee"></i>数据结构</span>
+      <span><i style="--c:#a78bfa"></i>组成原理</span>
+      <span><i style="--c:#fbbf24"></i>操作系统</span>
+      <span><i style="--c:#34d399"></i>计算机网络</span>
+    </div>
+  </div>
+  <div class="matrix-wrap" id="matrix-wrap"></div>
+</section>
+
+<!-- ============ 难度曲线 + 高频榜 ============ -->
+<section class="block split" id="trend">
+  <div class="split-left">
+    <div class="block-head compact">
+      <div>
+        <span class="kicker">03 / DIFFICULTY CURVE</span>
+        <h2>逐年难度曲线</h2>
+        <p>整体难度自 2016 年后长期处在 4—5 星，2021 年起稳定在 5 星区间。</p>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <svg id="diff-svg" viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="diff-legend" id="diff-legend"></div>
+  </div>
+
+  <div class="split-right">
+    <div class="block-head compact">
+      <div>
+        <span class="kicker">04 / TOP HEAT</span>
+        <h2>高频知识点 TOP 14</h2>
+        <p>热度 = 选择题次数 + 5 × 综合题次数。</p>
+      </div>
+    </div>
+    <div class="toplist" id="toplist"></div>
+  </div>
+</section>
+
+<!-- ============ 阶段演化 ============ -->
+<section class="block" id="phase">
+  <div class="block-head">
+    <div>
+      <span class="kicker">05 / PHASES</span>
+      <h2>十八年，三个阶段</h2>
+      <p>题型从"可默写"走向"可设计"，是 408 唯一一条贯穿始终的主线。</p>
+    </div>
+  </div>
+  <div class="phases" id="phases"></div>
+</section>
+
+<!-- ============ 洞察 ============ -->
+<section class="block" id="insight">
+  <div class="block-head">
+    <div>
+      <span class="kicker">06 / INSIGHTS</span>
+      <h2>数据说了什么</h2>
+      <p>频率是后视镜，不是预言。它能排学习顺序，不能押题。</p>
+    </div>
+  </div>
+  <div class="insights" id="insights"></div>
+</section>
+
+<footer class="foot">
+  <div>
+    <b>数据口径</b>
+    2009—2026 年共 18 套 408 真题逐题标注；热度 = 选择题次数 + 5 × 综合题次数；
+    一道题可同时归属多个知识点，故各点之和大于真实题量，仅用于比较相对轻重。
+  </div>
+  <div class="foot-right">考点演化图谱 · v1.0</div>
+</footer>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
