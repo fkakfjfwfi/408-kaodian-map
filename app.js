@@ -526,6 +526,25 @@
   }
 
   /* ------------------------------ 演化矩阵 ------------------------------ */
+  /* 考点 → 大观园：行名进章节讲解，色块进本章真题 */
+  function topicChapter(t) {
+    return t.chapter && CH[t.chapter] ? CH[t.chapter] : null;
+  }
+  function topicContentUrl(t) {
+    var c = topicChapter(t);
+    if (c && c.dagy && c.dagy.length) {
+      return DAGY + 'subject.html#/' + c.dagy[0].sub + '/ch' + c.dagy[0].ch;
+    }
+    return DAGY + 'subject.html#/' + (D.DAGY_SUB[t.sub] || t.sub);
+  }
+  function topicQuizUrl(t) {
+    var c = topicChapter(t);
+    if (c && c.dagy && c.dagy.length) {
+      return DAGY + 'quiz.html#/' + c.dagy[0].sub + '/ch' + c.dagy[0].ch;
+    }
+    return DAGY + 'quiz.html#/' + (D.DAGY_SUB[t.sub] || t.sub);
+  }
+
   function buildMatrix() {
     var wrap = $('matrix-wrap');
     var out = '<div class="mx">';
@@ -542,14 +561,22 @@
       }
       lastSub = t.sub;
       var s = SUB[t.sub];
+      var ch = topicChapter(t);
+      var labelTarget = ch ? (ch.name + ' · 章节讲解') : (s.name + '大观');
       out += '<div class="mx-row">';
-      out += '<div class="mx-label" style="--c:' + s.color + '"><i></i>' + esc(t.name) +
-        '<b>' + t.years.length + '</b></div>';
+      out += '<a class="mx-label" style="--c:' + s.color + '" href="' + topicContentUrl(t) +
+        '" target="_blank" rel="noopener" title="去大观园看：' + esc(labelTarget) + '">' +
+        '<i></i>' + esc(t.name) + '<b>' + t.years.length + '</b></a>';
       YEARS.forEach(function (y) {
         var on = t.years.indexOf(y) >= 0;
-        out += '<div class="mx-cell' + (on ? ' on' : '') + '" style="--c:' + s.color + '"' +
-          ' data-name="' + esc(t.name) + '" data-sub="' + esc(s.name) + '" data-year="' + y + '"' +
-          ' data-on="' + (on ? 1 : 0) + '"></div>';
+        if (on) {
+          out += '<a class="mx-cell on" style="--c:' + s.color + '" href="' + topicQuizUrl(t) +
+            '" target="_blank" rel="noopener" data-name="' + esc(t.name) + '" data-sub="' + esc(s.name) +
+            '" data-year="' + y + '" data-on="1" title="去大观园刷：' + esc(ch ? ch.name : s.name) + ' 真题"></a>';
+        } else {
+          out += '<div class="mx-cell" style="--c:' + s.color + '" data-name="' + esc(t.name) +
+            '" data-sub="' + esc(s.name) + '" data-year="' + y + '" data-on="0"></div>';
+        }
       });
       out += '</div>';
     });
@@ -565,7 +592,7 @@
       var sub = cell.getAttribute('data-sub');
       var year = cell.getAttribute('data-year');
       showTip('<b>' + year + '</b><br>' + esc(name) +
-        '<em>' + esc(sub) + ' · ' + (on ? '该年综合题中出现' : '该年未出现') + '</em>', e);
+        '<em>' + esc(sub) + ' · ' + (on ? '该年综合题中出现 · 点击去刷本章真题' : '该年未出现') + '</em>', e);
     });
     wrap.addEventListener('mousemove', function (e) {
       if (TIP.classList.contains('show')) moveTip(e);
