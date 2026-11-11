@@ -119,6 +119,26 @@
     }
   });
 
+  /* 双击节点 → 打开 408 大观园对应页面（保留原来的跳转能力） */
+  graph.on('dblclick', function (n) {
+    if (!n) return;
+    if (n.type === 'chapter') window.open(dagyChapterUrl(CH[n.chapterId]), '_blank', 'noopener');
+    else if (n.type === 'hub') window.open(dagySubjectUrl(n.sub), '_blank', 'noopener');
+    else if (n.type === 'point') window.open(dagyChapterUrl(CH[n.chapterId]), '_blank', 'noopener');
+  });
+
+  /* 统一入口：展开某章 + 出面板 + 取景（可选回到首屏） */
+  function focusChapter(cid, scroll) {
+    var c = CH[cid];
+    if (!c) return;
+    var n = graph.byId['ch:' + cid];
+    if (n && !n.expanded) graph.expand(cid);
+    state.chapter = cid;
+    renderChapter(c);
+    if (n) graph.focus(n.id, Math.max(graph.view.scale, 1.05));
+    if (scroll) $('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   /* ==================================================================
      2. 年份轨道
      ================================================================== */
@@ -247,6 +267,7 @@
   function setSubject(sid, refit) {
     state.subject = sid;
     graph.setFilter(sid);
+    syncHeatFilter();
     var chips = $('filters').querySelectorAll('.chip');
     for (var i = 0; i < chips.length; i++) {
       chips[i].classList.toggle('is-on', (chips[i].getAttribute('data-sub') || null) === sid);
@@ -470,7 +491,8 @@
       '</div>' +
       '<div class="sec">ALL POINTS · ' + c.points.length + '</div>' + list + links +
       '<div class="sec">NOTE</div>' +
-      '<p class="insp-note tight">一道真题常同时挂在多个知识点下，所以各点次数之和大于真实题量。这张表比的是相对轻重，不是绝对分值。</p>',
+      '<p class="insp-note tight">一道真题常同时挂在多个知识点下，所以各点次数之和大于真实题量。这张表比的是相对轻重，不是绝对分值。<br><br>' +
+      '<b>双击星图里这个节点</b>，直接打开大观园对应章节。</p>',
       '章节详情', 'c:' + c.id
     );
   }
@@ -656,6 +678,228 @@
     highlightMatrixCol(y);
     $('matrix-grid').querySelectorAll('.mx-year').forEach(function (b) {
       b.classList.toggle('is-on', String(y) === b.getAttribute('data-year'));
+    });
+  }
+
+  /* ==================================================================
+     6b. 章节 × 年份 热力矩阵
+     ================================================================== */
+  function chapterCompYears(cid) {
+    var map = {};
+    D.COMP_TOPICS.forEach(function (t) {
+      if (t.chapter !== cid) return;
+      t.years.forEach(function (y) {
+        if (!map[y]) map[y] = [];
+        map[y].push(t.name);
+      });
+    });
+    return map;
+  }
+
+  function buildHeatMatrix() {
+    var order = { ds: 0, co: 1, os: 2, net: 3 };
+    var annotated = D.CHAPTERS.filter(function (c) {
+      return Object.keys(chapterCompYears(c.id)).length > 0;
+    });
+    var rows = annotated.slice().sort(function (a, b) {
+      if (a.sub !== b.sub) return order[a.sub] - order[b.sub];
+      return b.comp - a.comp;
+    });
+    var missing = D.CHAPTERS.filter(function (c) {
+      return annotated.indexOf(c) < 0;
+    });
+
+    var out = '<div class="hm-row hm-head">' +
+      '<div class="hm-corner"><span class="mono">章节 / 年份</span><em>按科目分组</em></div>' +
+      YEARS.map(function (y) { return '<div class="hm-year mono">' + String(y).slice(2) + '</div>'; }).join('') +
+      '<div class="hm-sum mono">综合</div></div>';
+
+    var lastSub = null;
+    rows.forEach(function (c) {
+      var s = SUB[c.sub];
+      if (c.sub !== lastSub) {
+        lastSub = c.sub;
+        var ann = rows.filter(function (r) { return r.sub === c.sub; }).length;
+        out += '<div class="hm-group" data-sub="' + c.sub + '" style="--c:' + s.color + '">' +
+          '<i></i>' + esc(s.name) +
+          '<em class="mono">' + ann + ' / ' + CH_BY_SUB[c.sub].length + ' CHAPTERS</em></div>';
+      }
+      var map = chapterCompYears(c.id);
+      var hit = Object.keys(map).length;
+      out += '<div class="hm-row" data-chapter="' + c.id + '" data-sub="' + c.sub + '">' +
+        '<div class="hm-label" style="--c:' + s.color + '"><i></i>' + esc(c.name) + '</div>';
+      YEARS.forEach(function (y) {
+        var on = !!map[y];
+        out += '<div class="hm-cell' + (on ? ' on' : '') + '" style="--c:' + s.color + '"' +
+          ' data-year="' + y + '" data-on="' + (on ? 1 : 0) + '"' +
+          ' data-topics="' + esc((map[y] || []).join(' / ')) + '"></div>';
+      });
+      out += '<div class="hm-sum"><em class="mono">' + hit + '/18</em></div></div>';
+    });
+
+    var dup = {};
+    missing.forEach(function (c) { dup[c.name] = (dup[c.name] || 0) + 1; });
+    out += '<p class="hm-missing">无逐年标注、不进本表：' +
+      missing.map(function (c) {
+        return esc(c.name) + (dup[c.name] > 1 ? '（' + SUB[c.sub].short + '）' : '');
+      }).join('、') +
+      '。它们在 16 类考点之外，只有累计次数——不代表没考过大题。</p>';
+
+    var grid = $('heat-grid');
+    grid.innerHTML = out;
+
+    grid.addEventListener('mouseover', function (e) {
+      var cell = e.target.closest('.hm-cell');
+      if (!cell) return;
+      var row = cell.closest('.hm-row');
+      var cid = row.getAttribute('data-chapter');
+      var c = CH[cid];
+      var y = cell.getAttribute('data-year');
+      var on = cell.getAttribute('data-on') === '1';
+      var topics = cell.getAttribute('data-topics');
+      showTip('<b class="mono">' + y + '</b> · ' + esc(c.name) +
+        '<em>' + (on ? '综合题：' + esc(topics) : '该年未进综合题') + '</em>', e);
+      graph.setHighlight(['ch:' + cid], [cid]);
+    });
+    grid.addEventListener('mousemove', function (e) {
+      if (TIP.classList.contains('show')) moveTip(e);
+    });
+    grid.addEventListener('mouseout', function (e) {
+      if (e.target.closest('.hm-cell')) { hideTip(); clearYearHighlight(); }
+    });
+    grid.addEventListener('click', function (e) {
+      var row = e.target.closest('.hm-row');
+      if (!row || row.classList.contains('hm-head')) return;
+      focusChapter(row.getAttribute('data-chapter'), true);
+    });
+  }
+
+  function syncHeatFilter() {
+    if (!$('heat-grid')) return;
+    var rows = $('heat-grid').querySelectorAll('.hm-row[data-sub], .hm-group[data-sub]');
+    for (var i = 0; i < rows.length; i++) {
+      var sub = rows[i].getAttribute('data-sub');
+      rows[i].classList.toggle('is-off', !!state.subject && sub !== state.subject);
+    }
+  }
+
+  /* ==================================================================
+     6c. 跨科连体（CO ↔ OS 三条机制链）
+     ================================================================== */
+  function buildSankey() {
+    var svg = $('sankey');
+    var H = 440, LX = 186, MX = 452, RX = 714;
+    var unit = 5.4, gap = 38;
+
+    var leftIds = D.CROSS.map(function (x) { return x.a; });
+    var rightIds = D.CROSS.map(function (x) { return x.b; });
+
+    function stack(ids) {
+      var hs = ids.map(function (id) { return Math.max(26, CH[id].comp * unit); });
+      var total = hs.reduce(function (a, b) { return a + b; }, 0) + gap * (ids.length - 1);
+      var y = 40 + (H - 62 - total) / 2;
+      return ids.map(function (id, i) {
+        var o = { id: id, c: CH[id], y0: y, y1: y + hs[i], cy: y + hs[i] / 2, h: hs[i] };
+        y += hs[i] + gap;
+        return o;
+      });
+    }
+    var L = stack(leftIds), R = stack(rightIds);
+
+    function ribbon(x0, y0, y1, x1, yc) {
+      var mx = (x0 + x1) / 2;
+      return 'M' + x0 + ',' + y0 +
+        ' C' + mx + ',' + y0 + ' ' + mx + ',' + yc + ' ' + x1 + ',' + yc +
+        ' C' + mx + ',' + yc + ' ' + mx + ',' + y1 + ' ' + x0 + ',' + y1 + ' Z';
+    }
+    function ribbonTo(x0, yc, x1, y0, y1) {
+      var mx = (x0 + x1) / 2;
+      return 'M' + x0 + ',' + yc +
+        ' C' + mx + ',' + yc + ' ' + mx + ',' + y0 + ' ' + x1 + ',' + y0 +
+        ' L' + x1 + ',' + y1 +
+        ' C' + mx + ',' + y1 + ' ' + mx + ',' + yc + ' ' + x0 + ',' + yc + ' Z';
+    }
+    function lineTo(x0, y0, x1, y1) {
+      var mx = (x0 + x1) / 2;
+      return 'M' + x0 + ',' + y0 + ' C' + mx + ',' + y0 + ' ' + mx + ',' + y1 + ' ' + x1 + ',' + y1;
+    }
+
+    var out = '<defs>';
+    D.CROSS.forEach(function (lk, i) {
+      out += '<linearGradient id="skg' + i + '" x1="0" y1="0" x2="1" y2="0">' +
+        '<stop offset="0" stop-color="' + SUB[CH[lk.a].sub].color + '" stop-opacity=".6"/>' +
+        '<stop offset="1" stop-color="' + SUB[CH[lk.b].sub].color + '" stop-opacity=".6"/>' +
+        '</linearGradient>';
+    });
+    out += '</defs>';
+
+    out += '<text class="sk-col" x="' + (LX - 10) + '" y="20" text-anchor="end">计算机组成原理</text>';
+    out += '<text class="sk-col" x="' + (RX + 10) + '" y="20">操作系统</text>';
+    out += '<text class="sk-col dim" x="' + MX + '" y="20" text-anchor="middle">同一机制</text>';
+
+    D.CROSS.forEach(function (lk, i) {
+      var l = L[i], r = R[i];
+      var cy = (l.cy + r.cy) / 2;
+      var rad = 9 + (l.c.comp + r.c.comp) * 0.26;
+
+      out += '<g class="sk-link" data-link="' + i + '">' +
+        '<path class="sk-ribbon" d="' + ribbon(LX + 7, l.y0, l.y1, MX - rad, cy) + '" fill="url(#skg' + i + ')"/>' +
+        '<path class="sk-ribbon" d="' + ribbonTo(MX + rad, cy, RX, r.y0, r.y1) + '" fill="url(#skg' + i + ')"/>' +
+        '<path class="sk-flow" d="' + lineTo(LX + 7, l.cy, MX - rad, cy) + '"/>' +
+        '<path class="sk-flow" d="' + lineTo(MX + rad, cy, RX, r.cy) + '"/>' +
+        '<circle class="sk-circle" cx="' + MX + '" cy="' + cy + '" r="' + rad + '" ' +
+        'style="--c:' + SUB[CH[lk.a].sub].color + '"/>' +
+        '<text class="sk-mech" x="' + MX + '" y="' + (cy - rad - 11) + '" text-anchor="middle">' + esc(lk.name) + '</text>' +
+        '<text class="sk-w" x="' + MX + '" y="' + (cy + rad + 16) + '" text-anchor="middle">' +
+        (l.c.comp + r.c.comp) + ' 次综合题</text>' +
+        '</g>';
+    });
+
+    [L, R].forEach(function (col, side) {
+      col.forEach(function (o, i) {
+        var x = side === 0 ? LX : RX;
+        var color = SUB[o.c.sub].color;
+        var lk = D.CROSS[i];
+        out += '<g class="sk-node" data-chapter="' + o.id + '" style="--c:' + color + '">' +
+          '<rect class="sk-bar" x="' + x + '" y="' + o.y0 + '" width="7" height="' + (o.y1 - o.y0) + '" rx="2"/>' +
+          '<text class="sk-name" x="' + (side === 0 ? x - 13 : x + 14) + '" y="' + (o.cy - 2) + '" ' +
+          'text-anchor="' + (side === 0 ? 'end' : 'start') + '">' + esc(o.c.name) + '</text>' +
+          '<text class="sk-meta" x="' + (side === 0 ? x - 13 : x + 14) + '" y="' + (o.cy + 12) + '" ' +
+          'text-anchor="' + (side === 0 ? 'end' : 'start') + '">综 ' + o.c.comp + ' · 选 ' + o.c.choice + '</text>' +
+          '<title>' + esc(o.c.name) + ' · 综合题 ' + o.c.comp + ' 次</title>' +
+          '</g>';
+      });
+    });
+
+    out += '<line class="sk-axis" x1="' + MX + '" y1="30" x2="' + MX + '" y2="' + (H - 20) + '"/>';
+    svg.innerHTML = out;
+
+    svg.addEventListener('mouseover', function (e) {
+      var g = e.target.closest('.sk-link');
+      if (g) {
+        var i = +g.getAttribute('data-link');
+        var lk = D.CROSS[i];
+        svg.classList.add('is-focus');
+        g.classList.add('is-hot');
+        graph.setHighlight(['ch:' + lk.a, 'ch:' + lk.b], [lk.a, lk.b]);
+        showTip('<b>' + esc(lk.name) + '</b><em>' + esc(lk.note) + '</em>', e);
+        return;
+      }
+      var n = e.target.closest('.sk-node');
+      if (n) {
+        graph.setHighlight(['ch:' + n.getAttribute('data-chapter')], [n.getAttribute('data-chapter')]);
+      }
+    });
+    svg.addEventListener('mousemove', function (e) {
+      if (TIP.classList.contains('show')) moveTip(e);
+    });
+    svg.addEventListener('mouseout', function (e) {
+      var g = e.target.closest('.sk-link');
+      if (g) { g.classList.remove('is-hot'); svg.classList.remove('is-focus'); hideTip(); clearYearHighlight(); }
+    });
+    svg.addEventListener('click', function (e) {
+      var n = e.target.closest('.sk-node');
+      if (n) focusChapter(n.getAttribute('data-chapter'), true);
     });
   }
 
@@ -924,6 +1168,8 @@
     buildRail();
     buildFilters();
     buildMatrix();
+    buildHeatMatrix();
+    buildSankey();
     buildChart();
     buildTopList();
     buildPhases();

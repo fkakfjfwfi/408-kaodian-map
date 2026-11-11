@@ -490,6 +490,116 @@ body.is-playing .mx-cell.on.col-hot{animation:cellPop .5s ease-out}
 .tl-val{font-size:11px;color:var(--c);text-align:right;min-width:44px}
 .tl-val small{display:block;font-size:8px;color:#3f5574;letter-spacing:.2px}
 
+
+/* ---------------------------- 章节热力矩阵 ---------------------------- */
+.hm-shell{
+  border:1px solid var(--stroke);border-radius:6px;
+  background:linear-gradient(180deg,rgba(9,15,28,.62),rgba(6,10,18,.32));
+  padding:16px 18px 14px;
+  overflow-x:auto;
+}
+.hm{min-width:980px}
+.hm-row{
+  display:grid;
+  grid-template-columns:200px repeat(18,minmax(0,1fr)) 68px;
+  gap:3px;align-items:center;margin-bottom:3px;
+}
+.hm-head{margin-bottom:8px}
+.hm-corner{display:flex;flex-direction:column;gap:1px;padding-left:2px}
+.hm-corner span{font-size:9px;letter-spacing:1.4px;color:#3f5574}
+.hm-corner em{font-style:normal;font-size:9px;color:#33445c}
+.hm-year{font-size:9px;color:#4a5e7d;text-align:center;letter-spacing:.2px}
+.hm-cell{
+  height:20px;border-radius:2px;
+  background:rgba(110,170,255,.04);
+  border:1px solid rgba(110,170,255,.05);
+  transition:transform .16s,background .16s,box-shadow .16s;
+}
+.hm-cell.on{
+  background:color-mix(in srgb,var(--c) 38%,transparent);
+  border-color:color-mix(in srgb,var(--c) 62%,transparent);
+  box-shadow:0 0 8px color-mix(in srgb,var(--c) 22%,transparent) inset;
+}
+.hm-row:hover .hm-cell.on{
+  background:var(--c);
+  box-shadow:0 0 16px var(--c);
+  transform:scaleY(1.14);
+}
+.hm-row:hover .hm-label{color:#eaf6ff}
+.hm-label{
+  display:flex;align-items:center;gap:7px;
+  font-size:11.5px;color:#a8bcd6;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:.16s;
+}
+.hm-label i{flex:0 0 3px;width:3px;height:13px;border-radius:1px;background:var(--c);box-shadow:0 0 8px var(--c)}
+.hm-tag{
+  flex:0 0 auto;margin-left:6px;font-style:normal;
+  font-size:8.5px;color:#4a5f80;letter-spacing:.2px;
+  border:1px solid rgba(110,170,255,.14);border-radius:2px;padding:0 4px;
+}
+.hm-row.is-choice-only .hm-label{color:#7690b4}
+.hm-row.is-choice-only .hm-cell{border-style:dashed;border-color:rgba(110,170,255,.04)}
+.hm-sum{display:flex;align-items:baseline;justify-content:flex-end;gap:5px}
+.hm-sum b{font-size:11px;font-weight:600}
+.hm-sum em{font-style:normal;font-size:9px;color:#41546f}
+.hm-group{
+  display:flex;align-items:center;gap:8px;
+  margin:14px 0 7px;font-size:9.5px;letter-spacing:1.4px;color:#5b7397;
+  font-family:var(--mono);
+}
+.hm-group i{width:6px;height:6px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c)}
+.hm-group em{font-style:normal;font-size:8.5px;color:#3a4c66;letter-spacing:1px}
+.hm-row.is-off,.hm-group.is-off{display:none}
+.hm-note{margin-top:14px;font-size:10.5px;line-height:1.75;color:#41546f}
+.hm-missing{
+  margin-top:10px;padding-top:10px;
+  border-top:1px solid rgba(110,170,255,.06);
+  font-size:10.5px;line-height:1.8;color:#41546f;
+  white-space:normal;max-width:100%;
+}
+
+/* ---------------------------- 跨科连体 ---------------------------- */
+.sk-shell{
+  border:1px solid var(--stroke);border-radius:6px;
+  background:
+    radial-gradient(50% 60% at 50% 50%,rgba(34,211,238,.05),transparent 70%),
+    linear-gradient(180deg,rgba(9,15,28,.62),rgba(6,10,18,.32));
+  padding:14px 16px 8px;
+}
+#sankey{width:100%;height:auto;display:block;aspect-ratio:900/440}
+.sk-col{fill:#5b7397;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px}
+.sk-col.dim{fill:#3a4c66}
+.sk-axis{stroke:rgba(110,170,255,.10);stroke-width:1;stroke-dasharray:3 7}
+.sk-ribbon{opacity:.45;transition:opacity .22s}
+.sk-link:hover .sk-ribbon{opacity:.85}
+#sankey.is-focus .sk-link:not(.is-hot) .sk-ribbon{opacity:.10}
+.sk-link{cursor:pointer}
+.sk-flow{
+  fill:none;stroke:#eafcff;stroke-opacity:.30;stroke-width:1;
+  stroke-dasharray:2 12;animation:skflow 2s linear infinite;
+}
+@keyframes skflow{to{stroke-dashoffset:-28}}
+.sk-circle{
+  fill:#070d18;stroke:var(--c);stroke-width:1.5;
+  filter:drop-shadow(0 0 12px color-mix(in srgb,var(--c) 60%,transparent));
+  transition:.2s;
+}
+.sk-link:hover .sk-circle{fill:#0d1929;stroke-width:2.2}
+.sk-mech{fill:#dbe7f8;font-size:11.5px;letter-spacing:.3px}
+.sk-w{fill:#4f6484;font-size:8.5px;font-family:var(--mono);letter-spacing:.4px}
+.sk-node{cursor:pointer}
+.sk-bar{
+  fill:var(--c);opacity:.8;
+  filter:drop-shadow(0 0 8px color-mix(in srgb,var(--c) 45%,transparent));
+  transition:.2s;
+}
+.sk-node:hover .sk-bar{opacity:1;filter:drop-shadow(0 0 14px var(--c))}
+.sk-name{fill:#c8d8ec;font-size:12px;transition:.18s}
+.sk-meta{fill:#41546f;font-size:8.5px;font-family:var(--mono);letter-spacing:.3px}
+.sk-node:hover .sk-name{fill:#eaf6ff}
+.sk-foot{margin-top:8px;text-align:center;font-size:8.5px;letter-spacing:1.6px;color:#33445c}
+
 /* ---------------------------- 时间线 ---------------------------- */
 .timeline{position:relative;padding-top:46px}
 .tl-line{position:absolute;left:0;right:0;top:20px;height:1px;background:rgba(110,170,255,.14)}
@@ -617,6 +727,11 @@ html.no-anim .tl-bar{width:var(--w,0)}
   .topnav{display:none}
 }
 @media (max-width:760px){
+  .sk-name{font-size:20px}
+  .sk-mech{font-size:18px}
+  .sk-col{font-size:15px}
+  .sk-meta,.sk-w{display:none}
+  .hm{min-width:860px}
   .insights{grid-template-columns:1fr}
   .block{padding:56px 16px 0}
   .topbar{padding:0 14px}

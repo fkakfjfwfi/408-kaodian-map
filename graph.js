@@ -739,10 +739,19 @@
         p.node.pinned = false; // 松手后保留原位作为新锚点
       }
       if (p.down && !p.moved) {
-        if (p.node) self._emit('click', p.node);
-        else {
-          self.selected = null;
-          self._emit('click', null);
+        var now = performance.now();
+        var double = (now - (self._lastTapAt || 0)) < 340;
+        if (double) {
+          self._lastTapAt = 0;
+          if (p.node) self._emit('dblclick', p.node);
+          else self.fit(null, 20);
+        } else {
+          self._lastTapAt = now;
+          if (p.node) self._emit('click', p.node);
+          else {
+            self.selected = null;
+            self._emit('click', null);
+          }
         }
       }
       p.down = false;
@@ -752,13 +761,6 @@
     }
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
-
-    canvas.addEventListener('dblclick', function (e) {
-      var rect = canvas.getBoundingClientRect();
-      var n = self._hit(e.clientX - rect.left, e.clientY - rect.top);
-      if (n) self._emit('dblclick', n);
-      else self.fit(null, 90);
-    });
 
     canvas.addEventListener('wheel', function (e) {
       e.preventDefault();

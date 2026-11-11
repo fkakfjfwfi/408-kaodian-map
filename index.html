@@ -23,6 +23,8 @@
   <nav class="topnav">
     <a href="#map">知识星图</a>
     <a href="#matrix">演化矩阵</a>
+    <a href="#heat">章节热力</a>
+    <a href="#cross">跨科连体</a>
     <a href="#trend">难度曲线</a>
     <a href="#phase">阶段</a>
     <a class="ext" href="https://fkakfjfwfi.github.io/408-daguanyuan/" target="_blank" rel="noopener">408 大观园 ↗</a>
@@ -66,7 +68,7 @@
       <button class="btn" id="reset-btn" type="button">重置视图</button>
     </div>
     <div class="filters" id="filters"></div>
-    <div class="dock-hint"><i></i>拖拽节点 · 滚轮缩放 · 点章节展开知识点</div>
+    <div class="dock-hint"><i></i>点章节展开 · 双击进大观园 · 滚轮缩放</div>
   </div>
 
   <div class="rail" id="year-rail" aria-label="年份选择"></div>
@@ -100,13 +102,50 @@
   </div>
 </section>
 
+
+<!-- ======================= 章节热力 ======================= -->
+<section class="block" id="heat">
+  <div class="block-head" data-reveal>
+    <div>
+      <span class="kicker mono">03 / CHAPTER × YEAR</span>
+      <h2>章节 × 年份 热力矩阵</h2>
+      <p>16 类综合题考点覆盖到 13 个章节，只有这 13 章能落到年份上。横向看回归周期，纵向看一张卷子里综合题落在哪些章。最常出现的四条：<b class="hl">中央处理器 10/18 年、进程管理 7/18、网络层 6/18、文件管理 6/18</b>。</p>
+    </div>
+    <div class="hm-legend">
+      <span><i style="--c:#22d3ee"></i>数据结构</span>
+      <span><i style="--c:#a78bfa"></i>组成原理</span>
+      <span><i style="--c:#fbbf24"></i>操作系统</span>
+      <span><i style="--c:#34d399"></i>计算机网络</span>
+    </div>
+  </div>
+  <div class="hm-shell" data-reveal>
+    <div class="hm" id="heat-grid"></div>
+    <p class="hm-note">原始标注只到「章节 × 年份」这一层——知识点只有 18 年累计次数，没有逐年明细，所以按章折叠。点任意行在上面星图里展开该章。</p>
+  </div>
+</section>
+
+<!-- ======================= 跨科连体 ======================= -->
+<section class="block" id="cross">
+  <div class="block-head" data-reveal>
+    <div>
+      <span class="kicker mono">04 / CROSS-SUBJECT</span>
+      <h2>跨科连体：同一台机器，两个科目各考一半</h2>
+      <p>三条机制把组成原理和操作系统绑在一起。带宽 = 两侧章节的综合题引用之和（真实数据，非估算）。悬停看机制说明，点章节在星图里展开。</p>
+    </div>
+  </div>
+  <div class="sk-shell" data-reveal>
+    <svg id="sankey" viewBox="0 0 900 440" role="img" aria-label="组成原理与操作系统之间的三条机制链"></svg>
+    <div class="sk-foot mono">CO → OS · 3 MECHANISM BRIDGES · WEIGHT = COMP QUESTIONS ON BOTH SIDES</div>
+  </div>
+</section>
+
 <!-- ======================= 难度曲线 + 高频榜 ======================= -->
 <section class="block" id="trend">
   <div class="split">
     <div>
       <div class="block-head compact" data-reveal>
         <div>
-          <span class="kicker mono">03 / DIFFICULTY CURVE</span>
+          <span class="kicker mono">05 / DIFFICULTY CURVE</span>
           <h2>逐年难度曲线</h2>
           <p>切换科目看单科走势。悬停任意年份，右侧高频榜会告诉你那一年真正吃分的是什么。</p>
         </div>
@@ -121,7 +160,7 @@
     <div>
       <div class="block-head compact" data-reveal>
         <div>
-          <span class="kicker mono">04 / HEAT RANK</span>
+          <span class="kicker mono">05b / HEAT RANK</span>
           <h2>高频知识点 TOP 14</h2>
           <p>热度 = 选择题次数 + 5 × 综合题次数。<b class="hl">悬停任一条，星图上对应章节会亮。</b></p>
         </div>
@@ -135,7 +174,7 @@
 <section class="block" id="phase">
   <div class="block-head" data-reveal>
     <div>
-      <span class="kicker mono">05 / PHASES</span>
+      <span class="kicker mono">06 / PHASES</span>
       <h2>十八年，三个阶段</h2>
       <p>题型从「可默写」走向「可设计」，是 408 唯一一条贯穿始终的主线。</p>
     </div>
@@ -150,7 +189,7 @@
 <section class="block" id="insight">
   <div class="block-head" data-reveal>
     <div>
-      <span class="kicker mono">06 / INSIGHTS</span>
+      <span class="kicker mono">07 / INSIGHTS</span>
       <h2>数据说了什么</h2>
       <p>频率是后视镜，不是预言。它能排学习顺序，不能押题。</p>
     </div>
