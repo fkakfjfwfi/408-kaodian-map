@@ -540,6 +540,54 @@ window.DATA = (function () {
     }
   ];
 
+  /* ---------------------------- 大观园章节映射 ---------------------------- */
+  /* 深链规则：subject.html#/{ds|co|os|cn}/ch{章节序号，从 0 起}
+     序号以 408 大观园「四大观」页面的章节顺序为准 */
+  var DAGY_BASE = 'https://fkakfjfwfi.github.io/408-daguanyuan/';
+
+  var DAGY_MAP = {
+    /* 数据结构 */
+    ch_intro:     [{ sub: 'ds', ch: 0, name: '第一章 绪论' }],
+    ch_list:      [{ sub: 'ds', ch: 1, name: '第二章 线性表' }],
+    ch_linear_ds: [{ sub: 'ds', ch: 2, name: '第三章 栈、队列和数组' }],
+    ch_string:    [{ sub: 'ds', ch: 3, name: '第四章 串' }],
+    ch_tree:      [{ sub: 'ds', ch: 4, name: '第五章 树与二叉树' }],
+    ch_graph:     [{ sub: 'ds', ch: 5, name: '第六章 图' }],
+    ch_search:    [{ sub: 'ds', ch: 6, name: '第七章 查找' }],
+    ch_sort:      [{ sub: 'ds', ch: 7, name: '第八章 排序' }],
+
+    /* 计算机组成原理 */
+    ch_overview_co: [{ sub: 'co', ch: 0, name: '第一章 计算机系统概述' }],
+    ch_repr:        [{ sub: 'co', ch: 1, name: '第二章 数据的表示和运算' }],
+    ch_mem_co:      [{ sub: 'co', ch: 2, name: '第三章 存储系统' }],
+    ch_instr:       [{ sub: 'co', ch: 3, name: '第四章 指令系统' }],
+    ch_cpu:         [{ sub: 'co', ch: 4, name: '第五章 中央处理器' }],
+    ch_bus:         [
+      { sub: 'co', ch: 5, name: '第六章 总线' },
+      { sub: 'co', ch: 6, name: '第七章 输入/输出系统' }
+    ],
+
+    /* 操作系统 */
+    ch_overview_os: [{ sub: 'os', ch: 0, name: '第一章 操作系统概述' }],
+    ch_process:     [{ sub: 'os', ch: 1, name: '第二章 进程与线程' }],
+    ch_mem_os:      [{ sub: 'os', ch: 2, name: '第三章 内存管理' }],
+    ch_file:        [{ sub: 'os', ch: 3, name: '第四章 文件管理' }],
+    ch_io_os:       [{ sub: 'os', ch: 4, name: '第五章 输入/输出管理' }],
+
+    /* 计算机网络 */
+    ch_overall_net: [{ sub: 'cn', ch: 0, name: '第一章 计算机网络体系结构' }],
+    ch_physical:    [{ sub: 'cn', ch: 1, name: '第二章 物理层' }],
+    ch_datalink:    [{ sub: 'cn', ch: 2, name: '第三章 数据链路层' }],
+    ch_net_layer:   [{ sub: 'cn', ch: 3, name: '第四章 网络层' }],
+    ch_transport:   [{ sub: 'cn', ch: 4, name: '第五章 传输层' }],
+    ch_app:         [{ sub: 'cn', ch: 5, name: '第六章 应用层' }]
+  };
+
+  CHAPTERS.forEach(function (c) { c.dagy = DAGY_MAP[c.id] || []; });
+
+  /* 科目 → 大观园科目 key（我们的网络是 net，大观园是 cn） */
+  var DAGY_SUB = { ds: 'ds', co: 'co', os: 'os', net: 'cn' };
+
   return {
     YEARS: YEARS,
     SUBJECTS: SUBJECTS,
@@ -547,6 +595,8 @@ window.DATA = (function () {
     COMP_TOPICS: COMP_TOPICS,
     DIFFICULTY: DIFFICULTY,
     PHASES: PHASES,
-    INSIGHTS: INSIGHTS
+    INSIGHTS: INSIGHTS,
+    DAGY_BASE: DAGY_BASE,
+    DAGY_SUB: DAGY_SUB
   };
 })();

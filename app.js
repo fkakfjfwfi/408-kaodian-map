@@ -58,6 +58,24 @@
   }
   function hideTip() { TIP.classList.remove('show'); }
 
+  /* ---------------------------- 大观园互链 ---------------------------- */
+  var DAGY = D.DAGY_BASE;
+
+  function dagyChapterUrl(c, idx) {
+    var t = c.dagy && c.dagy[idx || 0];
+    return t ? DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch : null;
+  }
+  function dagyQuizUrl(c, idx) {
+    var t = c.dagy && c.dagy[idx || 0];
+    return t ? DAGY + 'quiz.html#/' + t.sub + '/ch' + t.ch : null;
+  }
+  function dagySubjectUrl(sid) {
+    return DAGY + 'subject.html#/' + (D.DAGY_SUB[sid] || sid);
+  }
+  function openInNewTab(url) {
+    if (url) window.open(url, '_blank', 'noopener');
+  }
+
   /* ------------------------------ 星图 ------------------------------ */
   var svg = $('map-svg');
 
@@ -225,34 +243,33 @@
 
     svg.addEventListener('click', function (e) {
       var node = e.target.closest ? e.target.closest('.node') : null;
-      var hub = e.target.closest ? e.target.closest('.hub') : null;
       if (node) {
-        pinned = { type: 'chapter', id: node.getAttribute('data-chapter') };
-      } else if (hub) {
-        pinned = { type: 'subject', id: hub.getAttribute('data-subject') };
-      } else {
+        var c = CH[node.getAttribute('data-chapter')];
+        if (c) openInNewTab(dagyChapterUrl(c));
         return;
       }
-      applyPinned();
+      var hub = e.target.closest ? e.target.closest('.hub') : null;
+      if (hub) openInNewTab(dagySubjectUrl(hub.getAttribute('data-subject')));
+    });
+
+    svg.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var node = e.target.closest ? e.target.closest('.node') : null;
+      if (!node) return;
+      e.preventDefault();
+      var c = CH[node.getAttribute('data-chapter')];
+      if (c) openInNewTab(dagyChapterUrl(c));
     });
   }
 
   function applyPinned() {
-    if (!pinned) {
-      highlightChapters(null);
-      renderDefault();
-      return;
-    }
-    if (pinned.type === 'chapter') {
-      highlightChapters([pinned.id]);
-      renderChapter(CH[pinned.id]);
-    } else if (pinned.type === 'subject') {
-      highlightChapters(CH_BY_SUB[pinned.id].map(function (x) { return x.id; }));
-      renderSubject(pinned.id);
-    } else if (pinned.type === 'year') {
+    if (pinned && pinned.type === 'year') {
       highlightChapters(yearChapters(pinned.id));
       renderYear(pinned.id);
+      return;
     }
+    highlightChapters(null);
+    renderDefault();
   }
 
   function yearChapters(y) {
@@ -311,9 +328,12 @@
       rows +
       '<div class="p-sec">HOW TO READ</div>' +
       '<div class="p-note" style="margin:0">' +
-        '左侧每个圆是一次科目枢纽，周围节点是章节。节点右下角的数字是"热度"= 选择题次数 + 5 × 综合题次数。<br><br>' +
-        '悬停节点，这里会展开该章全部知识点与各自被考次数；悬停下方年份，会点亮当年考过的综合题所在章节。' +
-      '</div>';
+        '左侧每个圆是一个科目枢纽，周围节点是章节。节点右下角的数字是"热度"= 选择题次数 + 5 × 综合题次数。<br><br>' +
+        '悬停节点，这里会展开该章全部知识点与各自被考次数；<b style="color:#9fe8f5">点击节点即跳转 408 大观园对应章节</b>；悬停下方年份，会点亮当年考过的综合题所在章节。' +
+      '</div>' +
+      '<div class="p-sec">LINKED SITE</div>' +
+      '<a class="p-link" style="--c:#22d3ee" target="_blank" rel="noopener" href="' + DAGY + '">' +
+        '<em>408 大观园 · 四科 26 章知识库</em><span>打开 →</span></a>';
   }
 
   function renderChapter(c) {
@@ -357,10 +377,25 @@
       '</div>' +
       '<div class="p-sec">ALL POINTS · ' + c.points.length + '</div>' +
       list +
+      chapterLinks(c, s) +
       '<div class="p-sec">NOTE</div>' +
       '<div class="p-note" style="margin:0;font-size:11px">一道真题常同时挂在多个知识点下，所以各点次数之和大于真实题量。这张表比的是相对轻重，不是绝对分值。</div>';
 
     panelBody.scrollTop = 0;
+  }
+
+  function chapterLinks(c, s) {
+    if (!c.dagy || !c.dagy.length) return '';
+    var out = '<div class="p-sec">GO TO 大观园</div>';
+    c.dagy.forEach(function (t) {
+      out += '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' +
+        DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch + '">' +
+        '<em>大观园 · ' + esc(t.name) + '</em><span>进入章节 →</span></a>';
+    });
+    out += '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' +
+      dagyQuizUrl(c) + '">' +
+      '<em>大观园 · 本章真题</em><span>去刷题 →</span></a>';
+    return out;
   }
 
   function renderSubject(sid) {
@@ -391,6 +426,9 @@
       '</div>' +
       '<div class="p-sec">CHAPTERS · ' + list.length + '</div>' +
       rows +
+      '<div class="p-sec">GO TO 大观园</div>' +
+      '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagySubjectUrl(sid) + '">' +
+        '<em>' + esc(s.name) + '大观 · 全部 ' + list.length + ' 章</em><span>进入 →</span></a>' +
       '<div class="p-sec">TOTAL</div>' +
       '<div class="p-note" style="margin:0;font-size:11px">18 年累计引用：选择题 ' + totalChoice +
       ' 次、综合题 ' + totalComp + ' 次，合计热度 ' + totalHeat + '。</div>';
