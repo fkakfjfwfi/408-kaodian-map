@@ -1,5 +1,7 @@
 /* ==========================================================================
-   408 考点演化图谱 · 交互与渲染
+   408 考点演化图谱 · 交互编排
+   - 星图 / 矩阵 / 曲线 / 年份条 四视图共享一个 state，互相互联
+   - 所有图表自己算坐标、自己画，不依赖任何库
    ========================================================================== */
 (function () {
   'use strict';
@@ -10,266 +12,161 @@
   D.SUBJECTS.forEach(function (s) { SUB[s.id] = s; CH_BY_SUB[s.id] = []; });
   D.CHAPTERS.forEach(function (c) { CH[c.id] = c; CH_BY_SUB[c.sub].push(c); });
 
-  var MAX_HEAT = D.CHAPTERS.reduce(function (m, c) { return Math.max(m, c.heat); }, 0);
   var TOTAL_POINTS = D.CHAPTERS.reduce(function (n, c) { return n + c.points.length; }, 0);
 
-  var LAYOUT = {
-    core: { x: 640, y: 360 },
-    W: 1280, H: 720,
-    hubR: 46,
-    nodeW: 192,
-    nodeH: 30,
-    step: 40,
-    quad: {
-      ds: { hx: 248, hy: 190, side: 'right', nx: 372 },
-      co: { hx: 1032, hy: 190, side: 'left', nx: 716 },
-      os: { hx: 248, hy: 530, side: 'right', nx: 372 },
-      net: { hx: 1032, hy: 530, side: 'left', nx: 716 }
-    }
+  var state = {
+    subject: null,
+    year: null,
+    chapter: null,
+    point: null,
+    playing: false,
+    timer: null,
+    series: { all: true, ds: false, co: false, os: false, net: false }
   };
 
-  /* ------------------------------ 工具 ------------------------------ */
+  /* ------------------------------------------------------------------ 工具 */
+  function $(id) { return document.getElementById(id); }
   function esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function heatOf(p) {
     if (p[1] === null || p[2] === null) return null;
     return p[1] + p[2] * 5;
   }
-  function $(id) { return document.getElementById(id); }
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
 
-  var TIP = document.createElement('div');
-  TIP.id = 'tip';
-  document.body.appendChild(TIP);
+  function tween(dur, fn, done) {
+    var t0 = performance.now();
+    function step(t) {
+      var k = clamp((t - t0) / dur, 0, 1);
+      fn(easeOut(k));
+      if (k < 1) requestAnimationFrame(step);
+      else if (done) done();
+    }
+    requestAnimationFrame(step);
+  }
 
+  /* 悬浮提示 */
+  var TIP = $('tip');
   function showTip(html, evt) {
     TIP.innerHTML = html;
     TIP.classList.add('show');
     moveTip(evt);
   }
   function moveTip(evt) {
-    var pad = 16;
-    var w = TIP.offsetWidth, h = TIP.offsetHeight;
+    var pad = 16, w = TIP.offsetWidth, h = TIP.offsetHeight;
     var x = evt.clientX + pad, y = evt.clientY + pad;
-    if (x + w > window.innerWidth - 8) x = evt.clientX - w - pad;
-    if (y + h > window.innerHeight - 8) y = evt.clientY - h - pad;
-    TIP.style.left = x + 'px';
-    TIP.style.top = y + 'px';
+    if (x + w > window.innerWidth - 10) x = evt.clientX - w - pad;
+    if (y + h > window.innerHeight - 10) y = evt.clientY - h - pad;
+    TIP.style.transform = 'translate(' + x + 'px,' + y + 'px)';
   }
   function hideTip() { TIP.classList.remove('show'); }
 
-  /* ---------------------------- 大观园互链 ---------------------------- */
+  /* 大观园深链 */
   var DAGY = D.DAGY_BASE;
-
-  function dagyChapterUrl(c, idx) {
-    var t = c.dagy && c.dagy[idx || 0];
-    return t ? DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch : null;
+  function dagyChapterUrl(c, i) {
+    var t = c.dagy && c.dagy[i || 0];
+    return t ? DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch : DAGY;
   }
-  function dagyQuizUrl(c, idx) {
-    var t = c.dagy && c.dagy[idx || 0];
-    return t ? DAGY + 'quiz.html#/' + t.sub + '/ch' + t.ch : null;
+  function dagyQuizUrl(c, i) {
+    var t = c.dagy && c.dagy[i || 0];
+    return t ? DAGY + 'quiz.html#/' + t.sub + '/ch' + t.ch : DAGY;
   }
   function dagySubjectUrl(sid) {
     return DAGY + 'subject.html#/' + (D.DAGY_SUB[sid] || sid);
   }
-  function openInNewTab(url) {
-    if (url) window.open(url, '_blank', 'noopener');
-  }
 
-  /* ------------------------------ 星图 ------------------------------ */
-  var svg = $('map-svg');
+  /* ==================================================================
+     1. 星图
+     ================================================================== */
+  var graph = new window.ForceGraph($('graph-canvas'), {});
+  var INSTANT = /[?&]instant=1/.test(location.search) ||
+    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  graph.instant = INSTANT;
+  graph.insets = window.innerWidth > 1120
+    ? { left: 40, right: 400, top: 128, bottom: 70 }
+    : { left: 8, right: 8, top: 20, bottom: 40 };
+  if (INSTANT) document.documentElement.classList.add('no-anim');
+  graph.load(D.SUBJECTS, D.CHAPTERS);
+  graph.start();
 
-  function defs() {
-    var d = '<defs>';
-    d += '<radialGradient id="coreGrad" cx="50%" cy="40%" r="68%">' +
-      '<stop offset="0" stop-color="#0f4a5e"/><stop offset="55%" stop-color="#082634"/>' +
-      '<stop offset="100%" stop-color="#03101a"/></radialGradient>';
-    d += '<radialGradient id="coreHalo"><stop offset="0" stop-color="#22d3ee" stop-opacity=".26"/>' +
-      '<stop offset="55%" stop-color="#22d3ee" stop-opacity=".07"/>' +
-      '<stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/></radialGradient>';
-    D.SUBJECTS.forEach(function (s) {
-      d += '<radialGradient id="neb-' + s.id + '"><stop offset="0" stop-color="' + s.color + '" stop-opacity=".14"/>' +
-        '<stop offset="55%" stop-color="' + s.color + '" stop-opacity=".045"/>' +
-        '<stop offset="100%" stop-color="' + s.color + '" stop-opacity="0"/></radialGradient>';
-      d += '<radialGradient id="hub-' + s.id + '" cx="50%" cy="34%">' +
-        '<stop offset="0" stop-color="' + s.color + '" stop-opacity=".34"/>' +
-        '<stop offset="100%" stop-color="' + s.color + '" stop-opacity=".05"/></radialGradient>';
-    });
-    d += '<filter id="softGlow" x="-90%" y="-90%" width="280%" height="280%">' +
-      '<feGaussianBlur stdDeviation="6" result="b"/>' +
-      '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
-    d += '</defs>';
-    return d;
-  }
+  graph.on('hover', function (n) {
+    if (!n) { restorePanel(); return; }
+    if (n.type === 'hub') renderSubject(n.sub);
+    else if (n.type === 'chapter') renderChapter(CH[n.chapterId]);
+    else if (n.type === 'point') renderPoint(n);
+  });
 
-  function tickRing() {
-    var s = '';
-    for (var i = 0; i < 72; i++) {
-      var a = (i / 72) * Math.PI * 2;
-      var long = i % 6 === 0;
-      var r1 = 110, r2 = long ? 122 : 116;
-      var x1 = Math.cos(a) * r1, y1 = Math.sin(a) * r1;
-      var x2 = Math.cos(a) * r2, y2 = Math.sin(a) * r2;
-      s += '<line x1="' + x1.toFixed(2) + '" y1="' + y1.toFixed(2) + '" x2="' + x2.toFixed(2) +
-        '" y2="' + y2.toFixed(2) + '" stroke="#22d3ee" stroke-opacity="' +
-        (long ? '.5' : '.18') + '" stroke-width="' + (long ? '1.2' : '.8') + '"/>';
-    }
-    return s;
-  }
-
-  function buildMap() {
-    var out = defs();
-
-    /* 星云底 */
-    D.SUBJECTS.forEach(function (s) {
-      var q = LAYOUT.quad[s.id];
-      out += '<circle cx="' + q.hx + '" cy="' + q.hy + '" r="330" fill="url(#neb-' + s.id + ')"/>';
-    });
-
-    /* 中心核心 */
-    out += '<g transform="translate(' + LAYOUT.core.x + ',' + LAYOUT.core.y + ')">' +
-      '<circle r="150" fill="url(#coreHalo)"/>' +
-      '<circle r="200" fill="none" stroke="#22d3ee" stroke-opacity=".055" stroke-dasharray="1 9"/>' +
-      '<circle r="160" fill="none" stroke="#22d3ee" stroke-opacity=".07"/>' +
-      '<circle class="core-ring" r="104"/>' +
-      '<circle class="core-ring-2" r="88"/>' +
-      tickRing() +
-      '</g>';
-
-    /* 主干光束 */
-    D.SUBJECTS.forEach(function (s, si) {
-      var q = LAYOUT.quad[s.id];
-      var d = 'M' + q.hx + ',' + q.hy + ' L' + LAYOUT.core.x + ',' + LAYOUT.core.y;
-      out += '<path class="beam" d="' + d + '" stroke="' + s.color + '"/>';
-      out += '<path class="beam-flow" d="' + d + '" stroke="' + s.color + '"/>';
-      /* 沿光束汇入中心的数据流粒子 */
-      for (var k = 0; k < 2; k++) {
-        out += '<circle r="2" fill="' + s.color + '" opacity=".85" filter="url(#softGlow)">' +
-          '<animateMotion dur="4.2s" begin="' + (-k * 2.1 - si * 0.5) + 's" repeatCount="indefinite" path="' + d + '"/>' +
-          '</circle>';
-      }
-    });
-
-    /* 章节连接线 */
-    D.SUBJECTS.forEach(function (s) {
-      var q = LAYOUT.quad[s.id];
-      var list = CH_BY_SUB[s.id];
-      var n = list.length;
-      list.forEach(function (c, i) {
-        var ny = q.hy - (n - 1) * LAYOUT.step / 2 + i * LAYOUT.step + LAYOUT.nodeH / 2;
-        var d;
-        if (q.side === 'right') {
-          d = 'M' + (q.hx + 36) + ',' + q.hy +
-            ' C' + (q.hx + 78) + ',' + q.hy + ' ' + (q.hx + 70) + ',' + ny +
-            ' ' + (q.nx - 2) + ',' + ny;
-        } else {
-          d = 'M' + (q.hx - 36) + ',' + q.hy +
-            ' C' + (q.hx - 78) + ',' + q.hy + ' ' + (q.hx - 70) + ',' + ny +
-            ' ' + (q.nx + LAYOUT.nodeW + 2) + ',' + ny;
-        }
-        out += '<path class="link" data-chapter="' + c.id + '" d="' + d + '" stroke="' + s.color + '"/>';
-      });
-    });
-
-    /* 章节节点 */
-    D.SUBJECTS.forEach(function (s) {
-      var q = LAYOUT.quad[s.id];
-      var list = CH_BY_SUB[s.id];
-      var n = list.length;
-      var startY = q.hy - (n - 1) * LAYOUT.step / 2 - LAYOUT.nodeH / 2;
-
-      list.forEach(function (c, i) {
-        var y = startY + i * LAYOUT.step;
-        var x = q.nx;
-        var meterW = Math.max(3, Math.round((c.heat / MAX_HEAT) * 150));
-        out += '<g class="node" data-chapter="' + c.id + '" style="--c:' + s.color + '">' +
-          '<rect class="node-bg" x="' + x + '" y="' + y + '" width="' + LAYOUT.nodeW + '" height="' + LAYOUT.nodeH + '" rx="3"/>' +
-          '<rect class="node-accent" x="' + x + '" y="' + y + '" width="2.5" height="' + LAYOUT.nodeH + '" fill="' + s.color + '" opacity=".55"/>' +
-          '<circle class="node-dot" cx="' + (q.side === 'right' ? x : x + LAYOUT.nodeW) + '" cy="' + (y + LAYOUT.nodeH / 2) + '" r="2.6"/>' +
-          '<text class="node-name" x="' + (x + 13) + '" y="' + (y + 19.5) + '">' + esc(c.name) + '</text>' +
-          '<text class="node-heat" x="' + (x + LAYOUT.nodeW - 12) + '" y="' + (y + 19.5) + '">' + c.heat + '</text>' +
-          '<rect class="node-meter" x="' + (x + 13) + '" y="' + (y + 24) + '" width="' + meterW + '" height="2" rx="1"/>' +
-          '</g>';
-      });
-    });
-
-    /* 科目枢纽 */
-    D.SUBJECTS.forEach(function (s) {
-      var q = LAYOUT.quad[s.id];
-      out += '<g class="hub" data-subject="' + s.id + '" transform="translate(' + q.hx + ',' + q.hy + ')" style="--c:' + s.color + '">' +
-        '<circle r="60" fill="url(#hub-' + s.id + ')"/>' +
-        '<circle class="hub-ring" r="52" stroke="' + s.color + '"/>' +
-        '<circle class="hub-ring-2" r="58" stroke="' + s.color + '" opacity=".18"/>' +
-        '<circle class="hub-core" r="38" fill="#070d18" stroke="' + s.color + '" stroke-width="1.4" stroke-opacity=".65"/>' +
-        '<text class="hub-name" y="-2">' + esc(s.short || s.name) + '</text>' +
-        '<text class="hub-score" y="16">' + s.score + ' 分</text>' +
-        '</g>';
-    });
-
-    /* 核心文字（最后绘制，保证在最上层） */
-    out += '<g transform="translate(' + LAYOUT.core.x + ',' + LAYOUT.core.y + ')" pointer-events="none">' +
-      '<circle r="68" fill="url(#coreGrad)" stroke="#22d3ee" stroke-opacity=".45" stroke-width="1.2" filter="url(#softGlow)"/>' +
-      '<circle r="68" fill="none" stroke="#22d3ee" stroke-opacity=".18" stroke-width="8"/>' +
-      '<text class="core-num" y="2">408</text>' +
-      '<text class="core-sub" y="22">150 分 / 180 min</text>' +
-      '<text class="core-label" y="-26">CORE</text>' +
-      '</g>';
-
-    svg.innerHTML = out;
-    bindMapEvents();
-  }
-
-  var pinned = null;
-
-  function bindMapEvents() {
-    svg.addEventListener('mouseover', function (e) {
-      var node = e.target.closest ? e.target.closest('.node') : null;
-      if (node) {
-        var c = CH[node.getAttribute('data-chapter')];
-        if (c) { highlightChapters([c.id]); renderChapter(c); }
-        return;
-      }
-      var hub = e.target.closest ? e.target.closest('.hub') : null;
-      if (hub) {
-        var sid = hub.getAttribute('data-subject');
-        highlightChapters(CH_BY_SUB[sid].map(function (x) { return x.id; }));
-        renderSubject(sid);
-      }
-    });
-
-    svg.addEventListener('mouseleave', function () {
-      applyPinned();
-    });
-
-    svg.addEventListener('click', function (e) {
-      var node = e.target.closest ? e.target.closest('.node') : null;
-      if (node) {
-        var c = CH[node.getAttribute('data-chapter')];
-        if (c) openInNewTab(dagyChapterUrl(c));
-        return;
-      }
-      var hub = e.target.closest ? e.target.closest('.hub') : null;
-      if (hub) openInNewTab(dagySubjectUrl(hub.getAttribute('data-subject')));
-    });
-
-    svg.addEventListener('keydown', function (e) {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      var node = e.target.closest ? e.target.closest('.node') : null;
-      if (!node) return;
-      e.preventDefault();
-      var c = CH[node.getAttribute('data-chapter')];
-      if (c) openInNewTab(dagyChapterUrl(c));
-    });
-  }
-
-  function applyPinned() {
-    if (pinned && pinned.type === 'year') {
-      highlightChapters(yearChapters(pinned.id));
-      renderYear(pinned.id);
+  graph.on('click', function (n) {
+    if (!n) {
+      state.chapter = null;
+      restorePanel();
       return;
     }
-    highlightChapters(null);
-    renderDefault();
+    if (n.type === 'chapter') {
+      var c = CH[n.chapterId];
+      state.chapter = c.id;
+      state.point = null;
+      graph.toggle(c.id);
+      renderChapter(c);
+    } else if (n.type === 'hub') {
+      setSubject(state.subject === n.sub ? null : n.sub, true);
+    } else if (n.type === 'point') {
+      state.point = n.id;
+      renderPoint(n);
+      graph.focus(n.id, Math.max(graph.view.scale, 1.6));
+    }
+  });
+
+  /* ==================================================================
+     2. 年份轨道
+     ================================================================== */
+  function compCountByYear(y) {
+    var n = 0;
+    D.COMP_TOPICS.forEach(function (t) { if (t.years.indexOf(y) >= 0) n++; });
+    return n;
+  }
+  var MAX_COMP = YEARS.reduce(function (m, y) { return Math.max(m, compCountByYear(y)); }, 1);
+
+  function buildRail() {
+    var maxComp = MAX_COMP;
+    $('year-rail').innerHTML = YEARS.map(function (y) {
+      var n = compCountByYear(y);
+      var h = 6 + Math.round((n / maxComp) * 34);
+      return '<button class="yr" type="button" data-year="' + y + '" title="' + y + ' 年 · ' + n + ' 类综合题">' +
+        '<em class="mono">' + String(y).slice(2) + '</em>' +
+        '<i style="height:' + h + 'px"></i>' +
+        '<span class="mono">' + n + '</span>' +
+        '</button>';
+    }).join('');
+
+    var rail = $('year-rail');
+    rail.addEventListener('mouseover', function (e) {
+      var b = e.target.closest('.yr');
+      if (b) setYear(+b.getAttribute('data-year'), { fromRail: true });
+    });
+    rail.addEventListener('mouseleave', function () {
+      if (!state.playing) {
+        state.year = null;
+        paintRail();
+        clearYearHighlight();
+        restorePanel();
+      }
+    });
+    rail.addEventListener('click', function (e) {
+      var b = e.target.closest('.yr');
+      if (!b) return;
+      e.preventDefault();
+      setYear(+b.getAttribute('data-year'));
+    });
+  }
+
+  function paintRail() {
+    var nodes = $('year-rail').querySelectorAll('.yr');
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.toggle('is-on', String(state.year) === nodes[i].getAttribute('data-year'));
+    }
   }
 
   function yearChapters(y) {
@@ -280,66 +177,256 @@
     return ids;
   }
 
-  function highlightChapters(ids) {
-    var nodes = svg.querySelectorAll('.node');
-    var links = svg.querySelectorAll('.link');
-    var on = !!(ids && ids.length);
-    nodes.forEach(function (n) {
-      var id = n.getAttribute('data-chapter');
-      if (!on) { n.classList.remove('is-hot', 'is-dim', 'is-off'); return; }
-      if (ids.indexOf(id) >= 0) {
-        n.classList.add('is-hot'); n.classList.remove('is-dim');
-      } else {
-        n.classList.remove('is-hot'); n.classList.add('is-dim');
-      }
-    });
-    links.forEach(function (l) {
-      var hit = on && ids.indexOf(l.getAttribute('data-chapter')) >= 0;
-      if (hit) l.classList.add('is-hot'); else l.classList.remove('is-hot');
+  function clearYearHighlight() {
+    graph.setHighlight(null, null);
+  }
+
+  function applyYearHighlight(y) {
+    var ids = yearChapters(y);
+    graph.setHighlight(ids.map(function (id) { return 'ch:' + id; }), ids);
+    ids.forEach(function (id) { graph.pulse('ch:' + id); });
+    graph.alpha = 1;
+  }
+
+  function setYear(y, opts) {
+    opts = opts || {};
+    state.year = y;
+    paintRail();
+    applyYearHighlight(y);
+    markMatrixYear(y);
+    markChartYear(y);
+    if (!opts.silentPanel) renderYear(y);
+  }
+
+  /* ==================================================================
+     3. 年份播放器
+     ================================================================== */
+  function togglePlay() {
+    state.playing ? stopPlay() : startPlay();
+  }
+  function startPlay() {
+    if (state.playing) return;
+    state.playing = true;
+    document.body.classList.add('is-playing');
+    var idx = state.year ? YEARS.indexOf(state.year) : -1;
+    function step() {
+      idx = (idx + 1) % YEARS.length;
+      setYear(YEARS[idx]);
+    }
+    step();
+    state.timer = setInterval(step, 1150);
+  }
+  function stopPlay() {
+    state.playing = false;
+    document.body.classList.remove('is-playing');
+    if (state.timer) clearInterval(state.timer);
+    state.timer = null;
+  }
+
+  $('play-btn').addEventListener('click', togglePlay);
+  $('matrix-play').addEventListener('click', togglePlay);
+
+  /* ==================================================================
+     4. 科目筛选
+     ================================================================== */
+  function buildFilters() {
+    var html = '<button class="chip is-on" type="button" data-sub="">全部</button>';
+    html += D.SUBJECTS.map(function (s) {
+      return '<button class="chip" type="button" data-sub="' + s.id + '" style="--c:' + s.color + '">' +
+        '<i></i>' + esc(s.short || s.name) + '</button>';
+    }).join('');
+    $('filters').innerHTML = html;
+
+    $('filters').addEventListener('click', function (e) {
+      var b = e.target.closest('.chip');
+      if (!b) return;
+      setSubject(b.getAttribute('data-sub') || null, true);
     });
   }
 
-  /* ------------------------------ 面板 ------------------------------ */
-  var panelMode = $('panel-mode');
-  var panelBody = $('panel-body');
+  function setSubject(sid, refit) {
+    state.subject = sid;
+    graph.setFilter(sid);
+    var chips = $('filters').querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle('is-on', (chips[i].getAttribute('data-sub') || null) === sid);
+    }
+    if (sid) {
+      renderSubject(sid);
+      if (refit) {
+        var ids = ['hub:' + sid];
+        CH_BY_SUB[sid].forEach(function (c) { ids.push('ch:' + c.id); });
+        graph.fit(ids, 80);
+      }
+    } else {
+      restorePanel();
+      if (refit) graph.fit(null, 90);
+    }
+  }
+
+  $('reset-btn').addEventListener('click', function () {
+    stopPlay();
+    state.year = null;
+    state.chapter = null;
+    state.point = null;
+    setSubject(null, false);
+    clearYearHighlight();
+    paintRail();
+    markMatrixYear(null);
+    markChartYear(null);
+    graph.collapseAll();
+    graph.fit(null, 24);
+    restorePanel();
+    hideTip();
+  });
+
+  /* ==================================================================
+     5. 详情面板
+     ================================================================== */
+  var inspBody = $('insp-body');
+  var inspMode = $('insp-mode');
+  var swapToken = 0;
+  var lastKey = null;
+
+  function swap(html, mode, key) {
+    if (key && key === lastKey) return;
+    lastKey = key || null;
+    var token = ++swapToken;
+    inspMode.textContent = mode;
+    inspBody.classList.add('is-swapping');
+    setTimeout(function () {
+      if (token !== swapToken) return;
+      inspBody.innerHTML = html;
+      inspBody.scrollTop = 0;
+      inspBody.classList.remove('is-swapping');
+    }, 110);
+  }
+
+  function restorePanel() {
+    if (state.chapter && CH[state.chapter]) { renderChapter(CH[state.chapter]); return; }
+    if (state.subject) { renderSubject(state.subject); return; }
+    if (state.year) { renderYear(state.year); return; }
+    renderDefault();
+  }
 
   function renderDefault() {
-    panelMode.textContent = '卷面结构';
     var rows = D.SUBJECTS.map(function (s) {
       var list = CH_BY_SUB[s.id];
       var heat = list.reduce(function (a, c) { return a + c.heat; }, 0);
-      var chCount = list.length;
-      return '<div class="ov-row" style="--c:' + s.color + '">' +
-        '<div class="ov-name"><i></i>' + esc(s.name) + '<span>' + chCount + ' 章</span></div>' +
-        '<div class="ov-val">' + s.score + ' 分<small>热度 ' + heat + '</small></div>' +
-        '</div>';
+      return '<button class="ov-row" type="button" data-sub="' + s.id + '" style="--c:' + s.color + '">' +
+        '<span class="ov-name"><i></i>' + esc(s.name) + '<em class="mono">' + list.length + ' 章</em></span>' +
+        '<span class="ov-val mono">' + s.score + ' 分<em>热度 ' + heat + '</em></span>' +
+        '</button>';
     }).join('');
 
-    panelBody.innerHTML =
-      '<div class="p-subject-tag" style="--c:#22d3ee">PAPER STRUCTURE</div>' +
-      '<div class="p-title">150 分，40 道选择 + 7 道综合</div>' +
-      '<div class="p-note">408 从 2009 年开始统考，卷面结构 18 年未变：80 分选择题 + 70 分综合题。变的是题怎么问。</div>' +
-      '<div class="p-metrics">' +
-        '<div class="p-metric"><b>150</b><span>满分</span></div>' +
-        '<div class="p-metric"><b>180</b><span>分钟</span></div>' +
-        '<div class="p-metric"><b>' + TOTAL_POINTS + '</b><span>知识点</span></div>' +
+    swap(
+      '<div class="tag" style="--c:#22d3ee">PAPER STRUCTURE</div>' +
+      '<h3 class="insp-title">40 道选择 + 7 道综合</h3>' +
+      '<p class="insp-note">408 从 2009 年统考至今，卷面结构 18 年没变：80 分选择 + 70 分综合。变的是题怎么问。</p>' +
+      donutHTML() +
+      '<div class="sec">SUBJECT WEIGHT</div>' + rows +
+      '<div class="sec">HOW TO USE</div>' +
+      '<p class="insp-note tight">星图里的圆点是一个个章节，圆越大热度越高。' +
+      '<b>点一下</b>它会摊开该章的全部知识点；<b>拖</b>节点、<b>滚</b>缩放、<b>双击空白</b>复位。<br><br>' +
+      '底部年份条是一个播放器，点「播放 18 年」看综合题怎么在四科之间迁移。</p>' +
+      '<div class="sec">LINKED</div>' +
+      '<a class="plink" style="--c:#22d3ee" target="_blank" rel="noopener" href="' + DAGY + '">' +
+      '<em>408 大观园 · 四科 26 章知识库</em><span class="mono">打开 →</span></a>',
+      '卷面结构', 'default'
+    );
+
+    wireOverview();
+  }
+
+  function donutHTML() {
+    var size = 168, r = 56, cx = size / 2, cy = size / 2;
+    var C = 2 * Math.PI * r;
+    var total = D.SUBJECTS.reduce(function (a, s) { return a + s.score; }, 0);
+    var acc = 0;
+    var segs = D.SUBJECTS.map(function (s) {
+      var len = (s.score / total) * C - 3;
+      var g = '<circle class="donut-seg" cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" ' +
+        'stroke="' + s.color + '" stroke-width="9" stroke-linecap="butt" ' +
+        'stroke-dasharray="' + Math.max(0, len) + ' ' + C + '" ' +
+        'stroke-dashoffset="' + (-acc) + '" ' +
+        'transform="rotate(-90 ' + cx + ' ' + cy + ')" ' +
+        'data-score="' + s.score + '"/>';
+      acc += (s.score / total) * C;
+      return g;
+    }).join('');
+
+    return '<div class="donut">' +
+      '<svg viewBox="0 0 ' + size + ' ' + size + '" class="donut-svg">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(110,170,255,.10)" stroke-width="9"/>' +
+      segs +
+      '</svg>' +
+      '<div class="donut-center"><b class="mono">150</b><span>满分</span></div>' +
+      '</div>';
+  }
+
+  function wireOverview() {
+    inspBody.querySelectorAll('.ov-row').forEach(function (row) {
+      row.addEventListener('mouseenter', function () {
+        var sid = row.getAttribute('data-sub');
+        var ids = CH_BY_SUB[sid].map(function (c) { return 'ch:' + c.id; });
+        graph.setHighlight(ids.concat(['hub:' + sid]), CH_BY_SUB[sid].map(function (c) { return c.id; }));
+      });
+      row.addEventListener('mouseleave', function () { clearYearHighlight(); });
+      row.addEventListener('click', function () { setSubject(row.getAttribute('data-sub'), true); });
+    });
+  }
+
+  function renderSubject(sid) {
+    var s = SUB[sid];
+    var list = CH_BY_SUB[sid];
+    var totalHeat = list.reduce(function (a, c) { return a + c.heat; }, 0);
+    var maxH = list.reduce(function (m, c) { return Math.max(m, c.heat); }, 1);
+
+    var rows = list.map(function (c) {
+      return '<button class="pt" type="button" data-chapter="' + c.id + '">' +
+        '<span class="pt-name">' + esc(c.name) + '<em class="mono">' + c.choice + '/' + c.comp + '</em></span>' +
+        '<span class="pt-bar"><b class="mono">' + c.heat + '</b>' +
+        '<i class="pt-track"><i class="pt-fill" style="width:' + Math.round(c.heat / maxH * 100) + '%"></i></i>' +
+        '</span></button>';
+    }).join('');
+
+    swap(
+      '<div class="tag" style="--c:' + s.color + '">' + esc(s.en) + '</div>' +
+      '<h3 class="insp-title">' + esc(s.name) + '</h3>' +
+      '<p class="insp-note">' + esc(s.tag) + '</p>' +
+      '<div class="metrics">' +
+        '<div class="metric"><b class="mono" style="color:' + s.color + '">' + s.score + '</b><span>分值</span></div>' +
+        '<div class="metric"><b class="mono">' + s.choice + '</b><span>选择 / 年</span></div>' +
+        '<div class="metric"><b class="mono">' + s.comp + '</b><span>综合 / 年</span></div>' +
       '</div>' +
-      '<div class="p-sec">SUBJECT WEIGHT</div>' +
-      rows +
-      '<div class="p-sec">HOW TO READ</div>' +
-      '<div class="p-note" style="margin:0">' +
-        '左侧每个圆是一个科目枢纽，周围节点是章节。节点右下角的数字是"热度"= 选择题次数 + 5 × 综合题次数。<br><br>' +
-        '悬停节点，这里会展开该章全部知识点与各自被考次数；<b style="color:#9fe8f5">点击节点即跳转 408 大观园对应章节</b>；悬停下方年份，会点亮当年考过的综合题所在章节。' +
-      '</div>' +
-      '<div class="p-sec">LINKED SITE</div>' +
-      '<a class="p-link" style="--c:#22d3ee" target="_blank" rel="noopener" href="' + DAGY + '">' +
-        '<em>408 大观园 · 四科 26 章知识库</em><span>打开 →</span></a>';
+      '<div class="sec">CHAPTERS · ' + list.length + '</div>' + rows +
+      '<div class="sec">TOTAL</div>' +
+      '<p class="insp-note tight">18 年累计引用：选择题 ' + list.reduce(function (a, c) { return a + c.choice; }, 0) +
+      ' 次，综合题 ' + list.reduce(function (a, c) { return a + c.comp; }, 0) + ' 次，合计热度 ' + totalHeat + '。</p>' +
+      '<a class="plink" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagySubjectUrl(sid) + '">' +
+      '<em>' + esc(s.name) + '大观 · 全部 ' + list.length + ' 章</em><span class="mono">进入 →</span></a>',
+      '科目概览', 's:' + sid
+    );
+
+    inspBody.querySelectorAll('.pt').forEach(function (row) {
+      var cid = row.getAttribute('data-chapter');
+      row.addEventListener('mouseenter', function () {
+        graph.setHighlight(['ch:' + cid], [cid]);
+      });
+      row.addEventListener('mouseleave', function () { clearYearHighlight(); });
+      row.addEventListener('click', function () {
+        var n = graph.byId['ch:' + cid];
+        if (n && !n.expanded) graph.expand(cid);
+        graph.focus('ch:' + cid, 1.25);
+        state.chapter = cid;
+        renderChapter(CH[cid]);
+      });
+    });
   }
 
   function renderChapter(c) {
     var s = SUB[c.sub];
-    panelMode.textContent = '章节详情';
-
+    var idx = CH_BY_SUB[c.sub].indexOf(c) + 1;
     var pts = c.points.slice().sort(function (a, b) {
       var ha = heatOf(a), hb = heatOf(b);
       if (ha === null && hb === null) return 0;
@@ -347,352 +434,372 @@
       if (hb === null) return -1;
       return hb - ha;
     });
-
     var maxP = pts.reduce(function (m, p) { return Math.max(m, heatOf(p) || 0); }, 1);
 
     var list = pts.map(function (p) {
       var h = heatOf(p);
-      var w = h === null ? 0 : Math.max(4, Math.round((h / maxP) * 34));
-      var nums = (p[1] === null)
-        ? '<span class="pt-nums">未单独统计</span>'
-        : '<span class="pt-nums">选 <b>' + p[1] + '</b> · 综 <b>' + p[2] + '</b></span>';
-      var cov = (p[3] !== null && p[3] !== undefined)
-        ? '<em>' + p[3] + '/18 年</em>' : '';
-      return '<div class="pt">' +
-        '<div class="pt-name">' + esc(p[0]) + cov + '</div>' +
-        '<div class="pt-bar">' + nums +
-          '<span class="pt-track"><span class="pt-fill" style="width:' + w + 'px"></span></span>' +
-        '</div></div>';
+      var w = h === null ? 0 : Math.max(3, Math.round((h / maxP) * 100));
+      var nums = p[1] === null ? '<em>未单独统计</em>'
+        : '选 <b>' + p[1] + '</b> · 综 <b>' + p[2] + '</b>';
+      var cov = (p[3] !== null && p[3] !== undefined) ? '<em class="cov mono">' + p[3] + '/18</em>' : '';
+      return '<div class="pt pt-static">' +
+        '<span class="pt-name">' + esc(p[0]) + cov + '</span>' +
+        '<span class="pt-bar"><em class="mono">' + nums + '</em>' +
+        '<i class="pt-track"><i class="pt-fill" style="width:' + w + '%"></i></i></span></div>';
     }).join('');
 
-    panelBody.innerHTML =
-      '<div class="p-subject-tag" style="--c:' + s.color + '">' + esc(s.name) + ' / ' +
-        String(CH_BY_SUB[c.sub].indexOf(c) + 1).padStart(2, '0') + '</div>' +
-      '<div class="p-title">' + esc(c.name) + '</div>' +
-      '<div class="p-note">' + esc(c.note) + '</div>' +
-      '<div class="p-metrics" style="--c:' + s.color + '">' +
-        '<div class="p-metric"><b style="color:' + s.color + '">' + c.heat + '</b><span>热度</span></div>' +
-        '<div class="p-metric"><b>' + c.choice + '</b><span>选择题</span></div>' +
-        '<div class="p-metric"><b>' + c.comp + '</b><span>综合题</span></div>' +
+    var links = '';
+    if (c.dagy && c.dagy.length) {
+      links = '<div class="sec">GO TO 大观园</div>' + c.dagy.map(function (t) {
+        return '<a class="plink" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' +
+          DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch + '">' +
+          '<em>大观园 · ' + esc(t.name) + '</em><span class="mono">进入章节 →</span></a>';
+      }).join('') +
+        '<a class="plink" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagyQuizUrl(c) + '">' +
+        '<em>大观园 · 本章真题</em><span class="mono">去刷题 →</span></a>';
+    }
+
+    swap(
+      '<div class="tag" style="--c:' + s.color + '">' + esc(s.name) + ' / ' + String(idx).padStart(2, '0') + '</div>' +
+      '<h3 class="insp-title">' + esc(c.name) + '</h3>' +
+      '<p class="insp-note">' + esc(c.note) + '</p>' +
+      '<div class="metrics">' +
+        '<div class="metric"><b class="mono" style="color:' + s.color + '">' + c.heat + '</b><span>热度</span></div>' +
+        '<div class="metric"><b class="mono">' + c.choice + '</b><span>选择题</span></div>' +
+        '<div class="metric"><b class="mono">' + c.comp + '</b><span>综合题</span></div>' +
       '</div>' +
-      '<div class="p-sec">ALL POINTS · ' + c.points.length + '</div>' +
-      list +
-      chapterLinks(c, s) +
-      '<div class="p-sec">NOTE</div>' +
-      '<div class="p-note" style="margin:0;font-size:11px">一道真题常同时挂在多个知识点下，所以各点次数之和大于真实题量。这张表比的是相对轻重，不是绝对分值。</div>';
-
-    panelBody.scrollTop = 0;
+      '<div class="sec">ALL POINTS · ' + c.points.length + '</div>' + list + links +
+      '<div class="sec">NOTE</div>' +
+      '<p class="insp-note tight">一道真题常同时挂在多个知识点下，所以各点次数之和大于真实题量。这张表比的是相对轻重，不是绝对分值。</p>',
+      '章节详情', 'c:' + c.id
+    );
   }
 
-  function chapterLinks(c, s) {
-    if (!c.dagy || !c.dagy.length) return '';
-    var out = '<div class="p-sec">GO TO 大观园</div>';
-    c.dagy.forEach(function (t) {
-      out += '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' +
-        DAGY + 'subject.html#/' + t.sub + '/ch' + t.ch + '">' +
-        '<em>大观园 · ' + esc(t.name) + '</em><span>进入章节 →</span></a>';
-    });
-    out += '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' +
-      dagyQuizUrl(c) + '">' +
-      '<em>大观园 · 本章真题</em><span>去刷题 →</span></a>';
-    return out;
-  }
+  function renderPoint(n) {
+    var c = CH[n.chapterId];
+    var s = SUB[n.sub];
+    var p = null;
+    c.points.forEach(function (x) { if (x[0] === n.label) p = x; });
+    var heat = n.heat || 0;
 
-  function renderSubject(sid) {
-    var s = SUB[sid];
-    panelMode.textContent = '科目概览';
-    var list = CH_BY_SUB[sid];
-    var totalHeat = list.reduce(function (a, c) { return a + c.heat; }, 0);
-    var totalChoice = list.reduce(function (a, c) { return a + c.choice; }, 0);
-    var totalComp = list.reduce(function (a, c) { return a + c.comp; }, 0);
-    var maxH = list.reduce(function (m, c) { return Math.max(m, c.heat); }, 1);
-
-    var rows = list.map(function (c) {
-      return '<div class="pt">' +
-        '<div class="pt-name">' + esc(c.name) + '<em>' + c.choice + ' / ' + c.comp + '</em></div>' +
-        '<div class="pt-bar"><span class="pt-nums"><b>' + c.heat + '</b></span>' +
-        '<span class="pt-track"><span class="pt-fill" style="width:' + Math.max(4, Math.round(c.heat / maxH * 34)) + 'px"></span></span>' +
-        '</div></div>';
-    }).join('');
-
-    panelBody.innerHTML =
-      '<div class="p-subject-tag" style="--c:' + s.color + '">' + s.en + '</div>' +
-      '<div class="p-title">' + esc(s.name) + '</div>' +
-      '<div class="p-note">' + esc(s.tag) + '</div>' +
-      '<div class="p-metrics">' +
-        '<div class="p-metric"><b style="color:' + s.color + '">' + s.score + '</b><span>分值</span></div>' +
-        '<div class="p-metric"><b>' + s.choice + '</b><span>选择题 / 年</span></div>' +
-        '<div class="p-metric"><b>' + s.comp + '</b><span>综合题 / 年</span></div>' +
+    swap(
+      '<div class="tag" style="--c:' + s.color + '">' + esc(s.name) + ' / ' + esc(c.name) + '</div>' +
+      '<h3 class="insp-title">' + esc(n.label) + '</h3>' +
+      '<div class="metrics">' +
+        '<div class="metric"><b class="mono" style="color:' + s.color + '">' + heat + '</b><span>热度</span></div>' +
+        '<div class="metric"><b class="mono">' + (p && p[1] !== null ? p[1] : '—') + '</b><span>选择题</span></div>' +
+        '<div class="metric"><b class="mono">' + (p && p[2] !== null ? p[2] : '—') + '</b><span>综合题</span></div>' +
       '</div>' +
-      '<div class="p-sec">CHAPTERS · ' + list.length + '</div>' +
-      rows +
-      '<div class="p-sec">GO TO 大观园</div>' +
-      '<a class="p-link" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagySubjectUrl(sid) + '">' +
-        '<em>' + esc(s.name) + '大观 · 全部 ' + list.length + ' 章</em><span>进入 →</span></a>' +
-      '<div class="p-sec">TOTAL</div>' +
-      '<div class="p-note" style="margin:0;font-size:11px">18 年累计引用：选择题 ' + totalChoice +
-      ' 次、综合题 ' + totalComp + ' 次，合计热度 ' + totalHeat + '。</div>';
-
-    panelBody.scrollTop = 0;
+      '<p class="insp-note">' + (p && p[3] ? '在 18 套卷中覆盖 ' + p[3] + ' 年。' : '该考点按章节统一统计，未单列覆盖年份。') +
+      '热度 = 选择题次数 + 5 × 综合题次数，用来横向比较轻重。</p>' +
+      '<div class="sec">GO TO 大观园</div>' +
+      '<a class="plink" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagyChapterUrl(c) + '">' +
+      '<em>大观园 · ' + esc(c.name) + '</em><span class="mono">进入章节 →</span></a>' +
+      '<a class="plink" style="--c:' + s.color + '" target="_blank" rel="noopener" href="' + dagyQuizUrl(c) + '">' +
+      '<em>本章真题</em><span class="mono">去刷题 →</span></a>',
+      '知识点', 'p:' + n.id
+    );
   }
 
-  function renderYear(year) {
-    var row = D.DIFFICULTY.filter(function (d) { return d.year === year; })[0];
+  function renderYear(y) {
+    var row = null;
+    D.DIFFICULTY.forEach(function (d) { if (d.year === y) row = d; });
     if (!row) return;
-    panelMode.textContent = year + ' 年';
-
-    var topics = D.COMP_TOPICS.filter(function (t) { return t.years.indexOf(year) >= 0; });
+    var topics = D.COMP_TOPICS.filter(function (t) { return t.years.indexOf(y) >= 0; });
 
     var stars = '';
     for (var i = 1; i <= 5; i++) {
       stars += '<i class="' + (i <= row.all ? 'on ' + (row.all >= 5 ? 'hot' : row.all === 4 ? 'warm' : '') : '') + '"></i>';
     }
 
-    var diffRows = D.SUBJECTS.map(function (s) {
-      var v = row[s.id === 'ds' ? 'ds' : s.id === 'co' ? 'co' : s.id === 'os' ? 'os' : 'net'];
-      var bars = '';
-      for (var k = 1; k <= 5; k++) {
-        bars += '<i class="' + (k <= v ? 'on ' + (v >= 5 ? 'hot' : v === 4 ? 'warm' : '') : '') + '" style="flex:1"></i>';
-      }
-      return '<div class="ov-row" style="--c:' + s.color + '">' +
-        '<div class="ov-name"><i></i>' + esc(s.name) + '</div>' +
-        '<div class="stars" style="margin:0">' + bars + '</div></div>';
-    }).join('');
-
     var topicHtml = topics.length ? topics.map(function (t) {
       var s = SUB[t.sub];
-      return '<div class="topic-line" style="--c:' + s.color + '"><i></i><div>' + esc(t.name) +
-        '<em>' + s.name + ' · 综合题</em></div></div>';
+      return '<div class="topic-line" style="--c:' + s.color + '"><i></i><span>' + esc(t.name) +
+        '<em class="mono">' + esc(s.name) + ' · 综合题</em></span></div>';
     }).join('') : '<div class="p-empty">该年无综合题记录</div>';
 
-    panelBody.innerHTML =
-      '<div class="p-subject-tag" style="--c:#22d3ee">YEAR SCAN</div>' +
-      '<div class="yr-big">' + year + '<small>' + esc(row.tag) + '</small></div>' +
+    swap(
+      '<div class="tag" style="--c:#22d3ee">YEAR SCAN</div>' +
+      '<div class="year-big mono">' + y + '<small>' + esc(row.tag) + '</small></div>' +
       '<div class="stars">' + stars + '</div>' +
-      '<div class="p-note">整体难度 ' + row.all + ' / 5</div>' +
-      '<div class="p-sec">SUBJECT DIFFICULTY</div>' +
-      diffRows +
-      '<div class="p-sec">COMPREHENSIVE · ' + topics.length + '</div>' +
-      topicHtml;
-
-    panelBody.scrollTop = 0;
+      '<div class="radar-wrap">' + radarHTML(row) + '</div>' +
+      '<div class="sec">COMPREHENSIVE · ' + topics.length + '</div>' + topicHtml,
+      y + ' 年', 'y:' + y
+    );
   }
 
-  /* ------------------------------ 年份条 ------------------------------ */
-  function buildYearBar() {
-    var track = $('year-track');
-    track.innerHTML = YEARS.map(function (y) {
-      var count = D.COMP_TOPICS.filter(function (t) { return t.years.indexOf(y) >= 0; }).length;
-      return '<div class="year-cell" data-year="' + y + '">' + y + '</div>';
+  function radarHTML(row) {
+    var size = 200, cx = size / 2, cy = size / 2 + 4, R = 60;
+    var axes = [
+      { key: 'ds', name: '数据', color: '#22d3ee', v: row.ds },
+      { key: 'co', name: '组原', color: '#a78bfa', v: row.co },
+      { key: 'os', name: '操作', color: '#fbbf24', v: row.os },
+      { key: 'net', name: '网络', color: '#34d399', v: row.net }
+    ];
+    var pts = [];
+    for (var v = 1; v <= 5; v++) {
+      var ring = axes.map(function (a, i) {
+        var ang = -Math.PI / 2 + i * (Math.PI / 2);
+        var rr = R * (v / 5);
+        return (cx + Math.cos(ang) * rr) + ',' + (cy + Math.sin(ang) * rr);
+      }).join(' ');
+      pts.push('<polygon class="radar-ring" points="' + ring + '"/>');
+    }
+    var spokes = axes.map(function (a, i) {
+      var ang = -Math.PI / 2 + i * (Math.PI / 2);
+      return '<line class="radar-spoke" x1="' + cx + '" y1="' + cy + '" x2="' +
+        (cx + Math.cos(ang) * R) + '" y2="' + (cy + Math.sin(ang) * R) + '"/>';
     }).join('');
 
-    track.addEventListener('mouseover', function (e) {
-      var cell = e.target.closest('.year-cell');
-      if (!cell) return;
-      var y = +cell.getAttribute('data-year');
-      onYearHover(y, cell);
-    });
-    track.addEventListener('mouseleave', function () {
-      markYearCell(pinned && pinned.type === 'year' ? pinned.id : null);
-      applyPinned();
-    });
-    track.addEventListener('click', function (e) {
-      var cell = e.target.closest('.year-cell');
-      if (!cell) return;
-      var y = +cell.getAttribute('data-year');
-      pinned = { type: 'year', id: y };
-      onYearHover(y, cell);
-    });
+    var labels = axes.map(function (a, i) {
+      var ang = -Math.PI / 2 + i * (Math.PI / 2);
+      var lx = cx + Math.cos(ang) * (R + 26);
+      var ly = cy + Math.sin(ang) * (R + 24);
+      return '<text class="radar-label" x="' + lx + '" y="' + (ly + 3) + '" fill="' + a.color + '">' +
+        esc(a.name) + ' ' + a.v + '</text>';
+    }).join('');
 
-    $('reset-btn').addEventListener('click', function () {
-      pinned = null;
-      markYearCell(null);
-      highlightChapters(null);
-      renderDefault();
-    });
+    var poly = axes.map(function (a, i) {
+      var ang = -Math.PI / 2 + i * (Math.PI / 2);
+      var rr = R * (a.v / 5);
+      return (cx + Math.cos(ang) * rr) + ',' + (cy + Math.sin(ang) * rr);
+    }).join(' ');
+
+    return '<svg viewBox="0 0 ' + size + ' ' + size + '" class="radar">' +
+      pts + spokes +
+      '<polygon class="radar-area" points="' + poly + '"/>' +
+      '<circle class="radar-dot" cx="' + cx + '" cy="' + cy + '" r="2"/>' +
+      labels + '</svg>' +
+      '<div class="radar-cap mono">SUBJECT DIFFICULTY · ' + row.year + '</div>';
   }
 
-  function markYearCell(y) {
-    var track = $('year-track');
-    track.querySelectorAll('.year-cell').forEach(function (c) {
-      c.classList.toggle('is-on', String(y) === c.getAttribute('data-year'));
-    });
-  }
-
-  function onYearHover(y, cell) {
-    markYearCell(y);
-    highlightChapters(yearChapters(y));
-    renderYear(y);
-  }
-
-  /* ------------------------------ 演化矩阵 ------------------------------ */
-  /* 考点 → 大观园：行名进章节讲解，色块进本章真题 */
-  function topicChapter(t) {
-    return t.chapter && CH[t.chapter] ? CH[t.chapter] : null;
-  }
-  function topicContentUrl(t) {
-    var c = topicChapter(t);
-    if (c && c.dagy && c.dagy.length) {
-      return DAGY + 'subject.html#/' + c.dagy[0].sub + '/ch' + c.dagy[0].ch;
-    }
-    return DAGY + 'subject.html#/' + (D.DAGY_SUB[t.sub] || t.sub);
-  }
-  function topicQuizUrl(t) {
-    var c = topicChapter(t);
-    if (c && c.dagy && c.dagy.length) {
-      return DAGY + 'quiz.html#/' + c.dagy[0].sub + '/ch' + c.dagy[0].ch;
-    }
-    return DAGY + 'quiz.html#/' + (D.DAGY_SUB[t.sub] || t.sub);
-  }
+  /* ==================================================================
+     6. 演化矩阵
+     ================================================================== */
+  var matrixCells = [];
 
   function buildMatrix() {
-    var wrap = $('matrix-wrap');
-    var out = '<div class="mx">';
-
-    /* 表头 */
-    out += '<div class="mx-row"><div class="mx-head grp">综合题考点 / 年份</div>';
-    YEARS.forEach(function (y) { out += '<div class="mx-head">' + y + '</div>'; });
-    out += '</div>';
+    var out = '<div class="mx-row mx-head-row">' +
+      '<div class="mx-corner"><span class="mono">综合题考点</span><em>↓ / 年份 →</em></div>' +
+      YEARS.map(function (y) { return '<button class="mx-year mono" type="button" data-year="' + y + '">' + String(y).slice(2) + '</button>'; }).join('') +
+      '</div>';
 
     var lastSub = null;
-    D.COMP_TOPICS.forEach(function (t) {
-      if (lastSub !== null && lastSub !== t.sub) {
-        out += '<div class="mx-sep"></div>';
-      }
+    D.COMP_TOPICS.forEach(function (t, ri) {
+      if (lastSub !== null && lastSub !== t.sub) out += '<div class="mx-sep"></div>';
       lastSub = t.sub;
       var s = SUB[t.sub];
-      var ch = topicChapter(t);
-      var labelTarget = ch ? (ch.name + ' · 章节讲解') : (s.name + '大观');
-      out += '<div class="mx-row">';
-      out += '<a class="mx-label" style="--c:' + s.color + '" href="' + topicContentUrl(t) +
-        '" target="_blank" rel="noopener" title="去大观园看：' + esc(labelTarget) + '">' +
-        '<i></i>' + esc(t.name) + '<b>' + t.years.length + '</b></a>';
+      var ch = t.chapter && CH[t.chapter];
+      out += '<div class="mx-row" data-row="' + ri + '">' +
+        '<a class="mx-label" style="--c:' + s.color + '" href="' + (ch ? dagyChapterUrl(ch) : dagySubjectUrl(t.sub)) +
+        '" target="_blank" rel="noopener" title="去大观园看：' + esc(ch ? ch.name : s.name) + '">' +
+        '<i></i><span>' + esc(t.name) + '</span><b class="mono">' + t.years.length + '</b></a>';
+
       YEARS.forEach(function (y) {
         var on = t.years.indexOf(y) >= 0;
-        if (on) {
-          out += '<a class="mx-cell on" style="--c:' + s.color + '" href="' + topicQuizUrl(t) +
-            '" target="_blank" rel="noopener" data-name="' + esc(t.name) + '" data-sub="' + esc(s.name) +
-            '" data-year="' + y + '" data-on="1" title="去大观园刷：' + esc(ch ? ch.name : s.name) + ' 真题"></a>';
-        } else {
-          out += '<div class="mx-cell" style="--c:' + s.color + '" data-name="' + esc(t.name) +
-            '" data-sub="' + esc(s.name) + '" data-year="' + y + '" data-on="0"></div>';
-        }
+        out += '<div class="mx-cell' + (on ? ' on' : '') + '" style="--c:' + s.color + '" ' +
+          'data-topic="' + esc(t.name) + '" data-sub="' + esc(s.name) + '" ' +
+          'data-chapter="' + (t.chapter || '') + '" data-year="' + y + '" data-on="' + (on ? 1 : 0) + '"></div>';
       });
       out += '</div>';
     });
 
-    out += '</div>';
-    wrap.innerHTML = out;
+    var grid = $('matrix-grid');
+    grid.innerHTML = out;
+    matrixCells = Array.prototype.slice.call(grid.querySelectorAll('.mx-cell'));
 
-    wrap.addEventListener('mouseover', function (e) {
+    grid.addEventListener('mouseover', function (e) {
       var cell = e.target.closest('.mx-cell');
       if (!cell) return;
+      highlightMatrixCol(+cell.getAttribute('data-year'));
       var on = cell.getAttribute('data-on') === '1';
-      var name = cell.getAttribute('data-name');
-      var sub = cell.getAttribute('data-sub');
-      var year = cell.getAttribute('data-year');
-      showTip('<b>' + year + '</b><br>' + esc(name) +
-        '<em>' + esc(sub) + ' · ' + (on ? '该年综合题中出现 · 点击去刷本章真题' : '该年未出现') + '</em>', e);
+      showTip('<b class="mono">' + cell.getAttribute('data-year') + '</b><br>' + esc(cell.getAttribute('data-topic')) +
+        '<em>' + esc(cell.getAttribute('data-sub')) + ' · ' + (on ? '该年综合题考过' : '该年未出现') + '</em>', e);
     });
-    wrap.addEventListener('mousemove', function (e) {
+    grid.addEventListener('mousemove', function (e) {
       if (TIP.classList.contains('show')) moveTip(e);
     });
-    wrap.addEventListener('mouseout', function (e) {
-      if (e.target.closest('.mx-cell')) hideTip();
-    });
-  }
-
-  /* ------------------------------ 难度曲线 ------------------------------ */
-  function buildDiffChart() {
-    var el = $('diff-svg');
-    var W = 900, H = 320;
-    var padL = 34, padR = 18, padT = 22, padB = 38;
-    var iw = W - padL - padR, ih = H - padT - padB;
-    var n = YEARS.length;
-
-    var x = function (i) { return padL + (iw / (n - 1)) * i; };
-    var y = function (v) { return padT + ih - ((v - 1) / 4) * ih; };
-
-    var series = [
-      { key: 'all', name: '整体', color: '#22d3ee', w: 2.2, op: 1 },
-      { key: 'ds', name: '数据结构', color: '#22d3ee', w: 1.1, op: .38 },
-      { key: 'co', name: '组成原理', color: '#a78bfa', w: 1.1, op: .38 },
-      { key: 'os', name: '操作系统', color: '#fbbf24', w: 1.1, op: .38 },
-      { key: 'net', name: '计算机网络', color: '#34d399', w: 1.1, op: .38 }
-    ];
-
-    var out = '<defs><linearGradient id="areaG" x1="0" y1="0" x2="0" y2="1">' +
-      '<stop offset="0" stop-color="#22d3ee" stop-opacity=".30"/>' +
-      '<stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>' +
-      '</linearGradient></defs>';
-
-    /* 网格 */
-    for (var v = 1; v <= 5; v++) {
-      out += '<line class="d-grid" x1="' + padL + '" y1="' + y(v) + '" x2="' + (W - padR) + '" y2="' + y(v) + '"/>';
-      out += '<text class="d-tick-y" x="' + (padL - 8) + '" y="' + (y(v) + 3) + '">' + v + '</text>';
-    }
-    out += '<line class="d-axis" x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (W - padR) + '" y2="' + (H - padB) + '"/>';
-
-    /* 面积 */
-    var areaPts = D.DIFFICULTY.map(function (d, i) { return x(i) + ',' + y(d.all); });
-    out += '<path d="M' + x(0) + ',' + y(1) + ' L' + areaPts.join(' L') +
-      ' L' + x(n - 1) + ',' + y(1) + ' Z" fill="url(#areaG)"/>';
-
-    /* 科目细线 */
-    ['ds', 'co', 'os', 'net'].forEach(function (k) {
-      var s = series.filter(function (z) { return z.key === k; })[0];
-      var pts = D.DIFFICULTY.map(function (d, i) { return x(i) + ',' + y(d[k]); });
-      out += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + s.color +
-        '" stroke-width="' + s.w + '" stroke-opacity="' + s.op + '" data-series="' + k + '"/>';
-    });
-
-    /* 整体线 */
-    out += '<polyline points="' + areaPts.join(' ') + '" fill="none" stroke="#22d3ee" stroke-width="2.2"' +
-      ' style="filter:drop-shadow(0 0 6px rgba(34,211,238,.7))"/>';
-
-    /* 年份轴 */
-    D.DIFFICULTY.forEach(function (d, i) {
-      if (i % 2 === 0 || i === n - 1) {
-        out += '<text class="d-tick" x="' + x(i) + '" y="' + (H - padB + 18) + '">' + String(d.year).slice(2) + '</text>';
+    grid.addEventListener('mouseout', function (e) {
+      if (e.target.closest('.mx-cell')) {
+        hideTip();
+        highlightMatrixCol(state.year);
       }
     });
 
-    /* 数据点 */
-    D.DIFFICULTY.forEach(function (d, i) {
-      out += '<circle class="d-dot" cx="' + x(i) + '" cy="' + y(d.all) + '" r="3.4" fill="#04060e"' +
-        ' stroke="#22d3ee" stroke-width="1.8" style="color:#22d3ee"' +
-        ' data-year="' + d.year + '" data-all="' + d.all + '" data-tag="' + esc(d.tag) + '"/>';
+    grid.addEventListener('click', function (e) {
+      var cell = e.target.closest('.mx-cell');
+      if (!cell || cell.getAttribute('data-on') !== '1') return;
+      var y = +cell.getAttribute('data-year');
+      var cid = cell.getAttribute('data-chapter');
+      setYear(y);
+      if (cid && CH[cid]) {
+        state.chapter = cid;
+        if (!graph.byId['ch:' + cid].expanded) graph.expand(cid);
+        graph.focus('ch:' + cid, 1.15);
+        renderChapter(CH[cid]);
+      }
     });
 
-    el.innerHTML = out;
-
-    el.addEventListener('mouseover', function (e) {
-      var dot = e.target.closest('.d-dot');
-      if (!dot) return;
-      showTip('<b>' + dot.getAttribute('data-year') + ' 年</b><br>整体难度 ' +
-        dot.getAttribute('data-all') + ' / 5<em>' + dot.getAttribute('data-tag') + '</em>', e);
+    grid.addEventListener('click', function (e) {
+      var yb = e.target.closest('.mx-year');
+      if (!yb) return;
+      setYear(+yb.getAttribute('data-year'));
     });
-    el.addEventListener('mousemove', function (e) {
-      if (TIP.classList.contains('show')) moveTip(e);
-    });
-    el.addEventListener('mouseout', function (e) {
-      if (e.target.closest('.d-dot')) hideTip();
-    });
-
-    /* 图例 */
-    $('diff-legend').innerHTML = series.map(function (s) {
-      return '<span data-series="' + s.key + '" style="--c:' + s.color + '"><i></i>' + s.name + '</span>';
-    }).join('');
   }
 
-  /* ------------------------------ 高频榜 ------------------------------ */
+  function highlightMatrixCol(y) {
+    matrixCells.forEach(function (c) {
+      c.classList.toggle('col-hot', String(y) === c.getAttribute('data-year'));
+    });
+  }
+  function markMatrixYear(y) {
+    highlightMatrixCol(y);
+    $('matrix-grid').querySelectorAll('.mx-year').forEach(function (b) {
+      b.classList.toggle('is-on', String(y) === b.getAttribute('data-year'));
+    });
+  }
+
+  /* ==================================================================
+     7. 难度曲线
+     ================================================================== */
+  var CHART = { W: 660, H: 400, padL: 30, padR: 16, padT: 26, padB: 44 };
+  var chartX = function (i) {
+    return CHART.padL + (CHART.W - CHART.padL - CHART.padR) / (YEARS.length - 1) * i;
+  };
+  var chartY = function (v) {
+    var ih = CHART.H - CHART.padT - CHART.padB;
+    return CHART.padT + ih - ((v - 1) / 4) * ih;
+  };
+  var SERIES = [
+    { key: 'all', name: '整体', color: '#22d3ee', w: 2.2 },
+    { key: 'ds', name: '数据结构', color: '#22d3ee', w: 1.2 },
+    { key: 'co', name: '组成原理', color: '#a78bfa', w: 1.2 },
+    { key: 'os', name: '操作系统', color: '#fbbf24', w: 1.2 },
+    { key: 'net', name: '计算机网络', color: '#34d399', w: 1.2 }
+  ];
+
+  function buildChart() {
+    var svg = $('diff-chart');
+    svg.setAttribute('viewBox', '0 0 ' + CHART.W + ' ' + CHART.H);
+    var padL = CHART.padL, padR = CHART.padR, H = CHART.H, padB = CHART.padB;
+    var out = '<defs><linearGradient id="areaG" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0" stop-color="#22d3ee" stop-opacity=".26"/>' +
+      '<stop offset="1" stop-color="#22d3ee" stop-opacity="0"/></linearGradient>' +
+      '<filter id="chartGlow" x="-40%" y="-40%" width="180%" height="180%">' +
+      '<feGaussianBlur stdDeviation="3.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+
+    for (var v = 1; v <= 5; v++) {
+      out += '<line class="c-grid" x1="' + padL + '" y1="' + chartY(v) + '" x2="' + (CHART.W - padR) + '" y2="' + chartY(v) + '"/>';
+      out += '<text class="c-tick-y mono" x="' + (padL - 9) + '" y="' + (chartY(v) + 3.5) + '">' + v + '</text>';
+    }
+    out += '<line class="c-axis" x1="' + padL + '" y1="' + (H - padB) + '" x2="' + (CHART.W - padR) + '" y2="' + (H - padB) + '"/>';
+
+    var pts = D.DIFFICULTY.map(function (d, i) { return chartX(i) + ',' + chartY(d.all); });
+    var area = 'M' + chartX(0) + ',' + chartY(1) + ' L' + pts.join(' L ') + ' L' + chartX(YEARS.length - 1) + ',' + chartY(1) + ' Z';
+    out += '<path class="c-area" d="' + area + '" fill="url(#areaG)"/>';
+
+    SERIES.forEach(function (s) {
+      if (s.key === 'all') return;
+      var p = D.DIFFICULTY.map(function (d, i) { return chartX(i) + ',' + chartY(d[s.key]); });
+      out += '<polyline class="c-serie" data-series="' + s.key + '" points="' + p.join(' ') +
+        '" fill="none" stroke="' + s.color + '" stroke-width="' + s.w + '" stroke-opacity="0"/>';
+    });
+
+    out += '<polyline class="c-main" points="' + pts.join(' ') + '" fill="none" stroke="#22d3ee" ' +
+      'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#chartGlow)"/>';
+
+    D.DIFFICULTY.forEach(function (d, i) {
+      out += '<circle class="c-dot" cx="' + chartX(i) + '" cy="' + chartY(d.all) + '" r="3.4" ' +
+        'data-year="' + d.year + '" data-all="' + d.all + '" data-tag="' + esc(d.tag) + '"/>';
+      out += '<text class="c-tick mono" x="' + chartX(i) + '" y="' + (H - padB + 18) + '">' + d.year + '</text>';
+    });
+
+    out += '<g class="c-cursor" id="chart-cursor" style="opacity:0">' +
+      '<line x1="0" y1="' + CHART.padT + '" x2="0" y2="' + (H - padB) + '"/>' +
+      '<circle class="c-cursor-dot" r="5" cx="0" cy="0"/></g>';
+
+    out += '<rect class="c-hit" fill="transparent" x="' + padL + '" y="0" width="' + (CHART.W - padL - padR) + '" height="' + (H - 10) + '"/>';
+
+    svg.innerHTML = out;
+
+    /* 入场：路径描边 */
+    var main = svg.querySelector('.c-main');
+    if (main && main.getTotalLength) {
+      var len = main.getTotalLength();
+      main.style.strokeDasharray = len;
+      main.style.strokeDashoffset = len;
+      requestAnimationFrame(function () {
+        main.style.transition = 'stroke-dashoffset 1.6s cubic-bezier(.25,.8,.25,1)';
+        main.style.strokeDashoffset = '0';
+      });
+    }
+
+    /* 图例 */
+    $('trend-legend').innerHTML = SERIES.map(function (s) {
+      return '<button class="lg' + (s.key === 'all' || state.series[s.key] ? ' is-on' : '') +
+        '" type="button" data-series="' + s.key + '" style="--c:' + s.color + '"><i></i>' + s.name + '</button>';
+    }).join('');
+
+    $('trend-legend').addEventListener('click', function (e) {
+      var b = e.target.closest('.lg');
+      if (!b) return;
+      var key = b.getAttribute('data-series');
+      if (key === 'all') return;
+      state.series[key] = !state.series[key];
+      b.classList.toggle('is-on', state.series[key]);
+      var line = svg.querySelector('[data-series="' + key + '"]');
+      if (line) line.style.strokeOpacity = state.series[key] ? 0.85 : 0;
+    });
+
+    /* 交互 */
+    svg.addEventListener('mousemove', function (e) {
+      var rect = svg.getBoundingClientRect();
+      var sx = (e.clientX - rect.left) / rect.width * CHART.W;
+      var idx = Math.round((sx - padL) / ((CHART.W - padL - padR) / (YEARS.length - 1)));
+      idx = clamp(idx, 0, YEARS.length - 1);
+      var d = D.DIFFICULTY[idx];
+      var cur = svg.querySelector('#chart-cursor');
+      cur.style.opacity = 1;
+      cur.querySelector('line').setAttribute('x1', chartX(idx));
+      cur.querySelector('line').setAttribute('x2', chartX(idx));
+      cur.querySelector('circle').setAttribute('cx', chartX(idx));
+      cur.querySelector('circle').setAttribute('cy', chartY(d.all));
+      showTip('<b class="mono">' + d.year + ' 年</b><br>整体难度 ' + d.all + ' / 5<em>' + esc(d.tag) + '</em>', e);
+      if (state.year !== d.year) setYear(d.year, { silentPanel: false });
+    });
+
+    svg.addEventListener('mouseleave', function () {
+      var cur = svg.querySelector('#chart-cursor');
+      if (cur) cur.style.opacity = 0;
+      hideTip();
+      if (!state.playing) {
+        state.year = null;
+        paintRail();
+        markMatrixYear(null);
+        clearYearHighlight();
+        restorePanel();
+      }
+    });
+  }
+
+  function markChartYear(y) {
+    var svg = $('diff-chart');
+    if (!svg) return;
+    svg.querySelectorAll('.c-dot').forEach(function (d) {
+      d.classList.toggle('is-on', String(y) === d.getAttribute('data-year'));
+    });
+  }
+
+  /* ==================================================================
+     8. 高频榜
+     ================================================================== */
   function buildTopList() {
     var all = [];
     D.CHAPTERS.forEach(function (c) {
       c.points.forEach(function (p) {
         var h = heatOf(p);
         if (h === null) return;
-        all.push({ name: p[0], heat: h, choice: p[1], comp: p[2], sub: c.sub, chapter: c.name });
+        all.push({ name: p[0], heat: h, choice: p[1], comp: p[2], sub: c.sub, chapter: c.id, chapterName: c.name });
       });
     });
     all.sort(function (a, b) { return b.heat - a.heat; });
@@ -701,63 +808,149 @@
 
     $('toplist').innerHTML = top.map(function (t, i) {
       var s = SUB[t.sub];
-      return '<div class="tl-row" style="--c:' + s.color + '">' +
-        '<div class="tl-rank">' + String(i + 1).padStart(2, '0') + '</div>' +
+      return '<div class="tl-row" style="--c:' + s.color + '" data-chapter="' + t.chapter + '">' +
+        '<div class="tl-rank mono">' + String(i + 1).padStart(2, '0') + '</div>' +
         '<div class="tl-main">' +
-          '<div class="tl-name"><i></i>' + esc(t.name) + '</div>' +
-          '<div class="tl-track"><div class="tl-bar" data-w="' + Math.round(t.heat / max * 100) + '"></div></div>' +
+          '<div class="tl-name"><i></i>' + esc(t.name) + '<em>' + esc(t.chapterName) + '</em></div>' +
+          '<div class="tl-track"><div class="tl-bar" data-w="' + (t.heat / max * 100).toFixed(1) + '%"></div></div>' +
         '</div>' +
-        '<div class="tl-val">' + t.heat + '<small>选 ' + t.choice + ' / 综 ' + t.comp + '</small></div>' +
+        '<div class="tl-val mono">' + t.heat + '<small>选' + t.choice + ' / 综' + t.comp + '</small></div>' +
       '</div>';
     }).join('');
 
-    var bars = $('toplist').querySelectorAll('.tl-bar');
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting) {
-          var b = en.target;
-          setTimeout(function () { b.style.width = b.getAttribute('data-w') + '%'; }, 60);
-          io.unobserve(b);
-        }
+    var rows = $('toplist').querySelectorAll('.tl-row');
+    rows.forEach(function (row) {
+      var cid = row.getAttribute('data-chapter');
+      row.addEventListener('mouseenter', function (e) {
+        graph.setHighlight(['ch:' + cid], [cid]);
+        graph.pulse('ch:' + cid);
+        showTip('<b>' + esc(CH[cid].name) + '</b><em>热度 ' + CH[cid].heat + ' · 点击展开该章知识点</em>', e);
       });
-    }, { threshold: 0.2 });
-    bars.forEach(function (b) { io.observe(b); });
+      row.addEventListener('mousemove', function (e) { moveTip(e); });
+      row.addEventListener('mouseleave', function () { hideTip(); clearYearHighlight(); });
+      row.addEventListener('click', function () {
+        var n = graph.byId['ch:' + cid];
+        if (n && !n.expanded) graph.expand(cid);
+        state.chapter = cid;
+        graph.focus('ch:' + cid, 1.2);
+        renderChapter(CH[cid]);
+        $('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
   }
 
-  /* ------------------------------ 阶段与洞察 ------------------------------ */
+  /* ==================================================================
+     9. 阶段 / 洞察
+     ================================================================== */
   function buildPhases() {
     var colors = ['#22d3ee', '#a78bfa', '#fbbf24'];
     $('phases').innerHTML = D.PHASES.map(function (p, i) {
-      return '<div class="phase" style="--c:' + colors[i] + '">' +
-        '<div class="phase-range">' + p.range + '</div>' +
-        '<div class="phase-name">' + esc(p.name) + '</div>' +
-        '<div class="phase-desc">' + esc(p.desc) + '</div>' +
-        '<div class="phase-points">' + p.points.map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('') + '</div>' +
-        '</div>';
+      return '<article class="phase" style="--c:' + colors[i] + '" data-i="' + i + '">' +
+        '<div class="phase-node"><i></i><b class="mono">0' + (i + 1) + '</b></div>' +
+        '<div class="phase-range mono">' + p.range + '</div>' +
+        '<h3 class="phase-name">' + esc(p.name) + '</h3>' +
+        '<p class="phase-desc">' + esc(p.desc) + '</p>' +
+        '<div class="phase-points">' + p.points.map(function (x) { return '<span class="mono">' + esc(x) + '</span>'; }).join('') + '</div>' +
+      '</article>';
     }).join('');
   }
 
   function buildInsights() {
-    $('insights').innerHTML = D.INSIGHTS.map(function (x) {
-      return '<div class="ins" style="--c:' + x.color + '">' +
-        '<span class="ins-tag">' + esc(x.tag) + '</span>' +
-        '<div class="ins-title">' + esc(x.title) + '</div>' +
-        '<div class="ins-desc">' + esc(x.desc) + '</div>' +
-        '</div>';
+    $('insights').innerHTML = D.INSIGHTS.map(function (x, i) {
+      return '<article class="ins" style="--c:' + x.color + '" data-reveal data-delay="' + (i % 4) * 60 + '">' +
+        '<span class="ins-tag mono">' + esc(x.tag) + '</span>' +
+        '<h3 class="ins-title">' + esc(x.title) + '</h3>' +
+        '<p class="ins-desc">' + esc(x.desc) + '</p>' +
+      '</article>';
     }).join('');
   }
 
-  /* ------------------------------ 启动 ------------------------------ */
+  /* ==================================================================
+     10. 入场动画 / 计数 / 时间线进度
+     ================================================================== */
+  function countUp() {
+    document.querySelectorAll('[data-count]').forEach(function (el) {
+      var to = +el.getAttribute('data-count');
+      if (INSTANT) { el.textContent = to; return; }
+      tween(1100, function (k) { el.textContent = Math.round(to * k); });
+    });
+  }
+
+  function observeReveals() {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        var el = en.target;
+        var d = +(el.getAttribute('data-delay') || 0);
+        setTimeout(function () { el.classList.add('in'); }, d);
+        io.unobserve(el);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('[data-reveal]').forEach(function (el) { io.observe(el); });
+
+    // 高频榜条形
+    var bars = document.querySelectorAll('.tl-bar');
+    bars.forEach(function (b) {
+      var io2 = new IntersectionObserver(function (es) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) {
+            b.style.width = b.getAttribute('data-w');
+            io2.unobserve(b);
+          }
+        });
+      }, { threshold: 0.2 });
+      io2.observe(b);
+    });
+
+    // 时间线进度
+    var tl = $('timeline');
+    var io3 = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (e.isIntersecting) {
+          $('tl-progress').style.width = '100%';
+          io3.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.3 });
+    io3.observe(tl);
+  }
+
+  /* ==================================================================
+     11. 启动
+     ================================================================== */
   function init() {
     $('stat-points').textContent = TOTAL_POINTS;
-    buildMap();
-    buildYearBar();
+
+    buildRail();
+    buildFilters();
     buildMatrix();
-    buildDiffChart();
+    buildChart();
     buildTopList();
     buildPhases();
     buildInsights();
     renderDefault();
+    countUp();
+    observeReveals();
+
+    // 首屏尺寸往往在 CSS 生效后才稳定，延后一次取景
+    setTimeout(function () { graph.fit(null, 20); }, 80);
+
+    window.addEventListener('keydown', function (e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+      if (e.key === 'Escape') $('reset-btn').click();
+    });
+
+    var rzTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(rzTimer);
+      rzTimer = setTimeout(function () {
+        graph.insets = window.innerWidth > 1120
+          ? { left: 40, right: 400, top: 128, bottom: 70 }
+          : { left: 8, right: 8, top: 16, bottom: 16 };
+        graph.fit(null, 20);
+      }, 220);
+    });
   }
 
   if (document.readyState === 'loading') {
